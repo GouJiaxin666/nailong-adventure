@@ -298,6 +298,7 @@ function resetGame() {
   freeShotT = 0;           // 雪王技能：免费再射窗口清空
   freeShotUsed = false;
   feverDur = FEVER_TIME;
+  dashT = skin === "lion" ? 5 : 0;   // 锤锤技能：开局 5 秒无敌冲刺
   player.y = GROUND_Y - player.h;
   player.vy = 0;
   player.jumps = 0;
@@ -333,9 +334,10 @@ function gameOver() {
     best = score;
     localStorage.setItem("nailong_best", best);
   }
-  // 进阶模式最高分记录 → 解锁形象（6000 雪王 / 12000 吃豆人，可同局连解）
+  // 进阶模式最高分记录 → 解锁形象（6000 雪王 / 12000 吃豆人 / 18000 锤锤，可同局连解，只提示最高档）
   if (gameMode === "hard" && score > bestHard) {
-    if (bestHard < 12000 && score >= 12000) newUnlock = "pacman";
+    if (bestHard < 18000 && score >= 18000) newUnlock = "lion";
+    else if (bestHard < 12000 && score >= 12000) newUnlock = "pacman";
     else if (bestHard < 6000 && score >= 6000) newUnlock = "snowking";
     bestHard = score;
     localStorage.setItem("nailong_best_hard", bestHard);
@@ -512,7 +514,11 @@ function update(dt) {
       });
     }
   }
-  if (fever > 0) {
+  if (dashT > 0) {
+    // 锤锤技能：开局无敌冲刺，固定 480 高速
+    dashT = Math.max(0, dashT - dt);
+    speed = FEVER_SPEED;
+  } else if (fever > 0) {
     fever = Math.max(0, fever - dt);
     if (fever === 0) {
       feverBgmStop();          // 奶龙时刻结束，停掉专属 BGM
@@ -673,8 +679,8 @@ function update(dt) {
     projectiles = projectiles.filter(p => !p.dead && p.x < W + 30);
   }
 
-  // 碰撞（包围盒与奶龙躯干对齐，比视觉略小，手感宽容；奶龙时刻及结束后 0.5s 宽限、奶龙复活 1s 内无敌，直接穿过障碍）
-  if (fever <= 0 && feverGrace <= 0 && reviveInvuln <= 0) {
+  // 碰撞（包围盒与奶龙躯干对齐，比视觉略小，手感宽容；奶龙时刻及结束后 0.5s 宽限、奶龙复活 1s、锤锤冲刺 5s 内无敌，直接穿过障碍）
+  if (fever <= 0 && feverGrace <= 0 && reviveInvuln <= 0 && dashT <= 0) {
     for (const o of obstacles) {
       const sx = o.wx - worldX + PLAYER_SCREEN_X;
       const ob = obstacleBox(o, sx);
@@ -896,6 +902,36 @@ const PACMAN_RUNB = [
 const PACMAN_JUMP = PACMAN_BODY.slice();
 const PACMAN_SPR = { runA: PACMAN_BODY, runB: PACMAN_RUNB, jump: PACMAN_JUMP };
 
+/* ---- 锤锤（小狮子）：红色火焰鬃毛 + 黄色圆脸 + 张嘴笑 + 左侧尾巴（荧光带不画） ----
+   ★ 每行必须恰好16字符 */
+const LION_PAL = { "m": "#e05a1a", "y": "#ffc23e", "b": "#ffe1ad", "e": "#33241a", "n": "#7a3b12", "r": "#d43a2a" };
+const LION_BODY = [
+  "....m.mm.mm.....",    // r0 鬃毛顶刺
+  "..mmmmmmmmmmmm..",    // r1
+  ".mmmmmmmmmmmmmm.",    // r2 鬃毛最宽
+  "mmm.yyyyyyyy.mmm",    // r3 脸部开始
+  "mmm.yyyyyyyy.mmm",    // r4
+  "mmm.yyeyyeyy.mmm",    // r5 眼
+  "mmm.yyeyyeyy.mmm",    // r6 眼
+  "mmm.yyynnyyy.mmm",    // r7 鼻
+  "mmm.yyrrrrry.mmm",    // r8 张嘴笑
+  "mmm.yyrrrrry.mmm",    // r9
+  "mmm.yyyrrryy.mmm",    // r10 嘴收
+  ".mmyyyyyyyyyymm.",    // r11 下巴
+  ".mmmyyyyyyyymmm.",    // r12 身体
+  "m...yyyyyyyy.mm.",    // r13 尾尖(左)
+  "mm..yyyyyyyy....",    // r14 尾巴
+  "....bb....bb...."     // r15 脚掌
+];
+// 跑步第二帧：脚掌错开
+const LION_RUNB = LION_BODY.slice();
+LION_RUNB[15] = "....bb.....bb...";
+// 空中帧：收脚收尾
+const LION_JUMP = LION_BODY.slice();
+LION_JUMP[14] = "mm...yyyyyy.....";
+LION_JUMP[15] = "................";
+const LION_SPR = { runA: LION_BODY, runB: LION_RUNB, jump: LION_JUMP };
+
 const SKINS = {
   nailong: {
     name: "奶龙", need: 0, spr: SPR, pal: NAILONG_PAL,
@@ -923,15 +959,25 @@ const SKINS = {
     dead: { col: "#141414",
             x: [[-4,-26],[-2,-24],[0,-22],[0,-26],[-4,-22]],
             mouth: null }                                          // 吃豆人大嘴是本体特征
+  },
+  lion: {
+    name: "锤锤", need: 18000, spr: LION_SPR, pal: LION_PAL,
+    skillDesc: ["开局立即以极速冲刺 5 秒", "冲刺期间无敌"],
+    pc: ["#e05a1a", "#ffc23e"],
+    blink: { fill: "#ffc23e", line: "#33241a", r: [-4, -22, 7, 4], l: [-3, -20, 5, 1] },
+    dead: { col: "#33241a",
+            x: [[-4,-22],[-2,-20],[-2,-22],[-4,-20],[2,-22],[4,-20],[4,-22],[2,-20]],
+            mouth: null }                                          // 锤锤本来就是张嘴笑
   }
 };
 let skin = localStorage.getItem("nailong_skin") || "nailong";
 if (!SKINS[skin]) skin = "nailong";
-// 形象面板卡片点击区（三卡横排）
+// 形象面板卡片点击区（四卡横排）
 const SKIN_CARD = {
-  nailong:  { x: 45,  y: 54, w: 120, h: 118 },
-  snowking: { x: 180, y: 54, w: 120, h: 118 },
-  pacman:   { x: 315, y: 54, w: 120, h: 118 }
+  nailong:  { x: 45,  y: 54, w: 90, h: 118 },
+  snowking: { x: 145, y: 54, w: 90, h: 118 },
+  pacman:   { x: 245, y: 54, w: 90, h: 118 },
+  lion:     { x: 345, y: 54, w: 90, h: 118 }
 };
 
 /* ---- 形象技能运行时状态（resetGame 重置） ---- */
@@ -940,6 +986,7 @@ let reviveInvuln = 0;       // 奶龙技能：复活后的无敌剩余时间
 let freeShotT = 0;          // 雪王技能：免费再射窗口剩余时间
 let freeShotUsed = false;   // 雪王技能：当前窗口的免费射击是否已用
 let feverDur = FEVER_TIME;  // 本次奶龙时刻总时长（吃豆人技能 +2s）
+let dashT = 0;              // 锤锤技能：开局无敌冲刺剩余时间（480 高速）
 
 function drawSprite(map, ox, oy, scale = 2, pal = NAILONG_PAL) {
   for (let r = 0; r < map.length; r++) {
@@ -1323,8 +1370,8 @@ function render() {
     drawCactus(sx < -40 ? sx + 700 : sx, 24);
   }
 
-  // 奶龙时刻：全屏金色速度线（横向疾驰条）
-  if (state === STATE.PLAY && fever > 0) {
+  // 奶龙时刻 / 锤锤冲刺：全屏金色速度线（横向疾驰条）
+  if (state === STATE.PLAY && (fever > 0 || dashT > 0)) {
     for (let i = 0; i < 6; i++) {
       const ly = Math.floor(Math.random() * (GROUND_Y - 20)) + 10;
       const lx = Math.floor(Math.random() * W);
@@ -1476,11 +1523,9 @@ function render() {
     ly += 5;
     line("【进阶模式】", "#ffe873");
     line("· 提速更快，障碍更凶险");
-    line("· 拾取子弹可发射弹药，摧毁障碍额外得分");
-    line("· 子弹命中飞鸟可获得更高分");
+    line("· 拾取子弹可发射弹药，摧毁障碍或命中飞鸟额外得分");
     line("· 达成目标分数触发「奶龙时刻」");
     line("  短时间内无敌、超高速、无限弹药");
-    line("· 冲高分可解锁新形象（首页-分数奖励）");
 
     // 关闭提示（闪烁）
     if (Math.floor(performance.now() / 400) % 2 === 0) {
@@ -1501,9 +1546,9 @@ function render() {
     px(ix + iw - 3, iy, 3, ih, C.panelE);
 
     pixelText("分数奖励 · 形象", W / 2, iy + 10, 20, "#ffd23f", "center", false);
-    pixelText("进阶模式最高分解锁新形象：6000 雪王 · 12000 吃豆人", W / 2, iy + 30, 11, "#9fd8ff", "center");
+    pixelText("进阶模式最高分解锁新形象", W / 2, iy + 30, 11, "#9fd8ff", "center");
 
-    for (const id of ["nailong", "snowking", "pacman"]) {
+    for (const id of ["nailong", "snowking", "pacman", "lion"]) {
       const sk = SKINS[id], b = SKIN_CARD[id];
       const sel = skin === id, unl = bestHard >= sk.need;
       // 卡片底 + 选中金边
@@ -1522,10 +1567,10 @@ function render() {
         pixelText(sel ? "✓ 使用中" : "点击使用", b.x + b.w / 2, b.y + 76, 11, sel ? "#ffe873" : "#9fd8ff", "center");
       } else {
         pixelText("🔒 未解锁", b.x + b.w / 2, b.y + 72, 11, "#ff9aa9", "center");
-        pixelText("进阶最高 " + bestHard + " / " + sk.need, b.x + b.w / 2, b.y + 84, 9, "#cfc6f2", "center");
-        const pw2 = b.w - 40, pr = Math.min(1, bestHard / sk.need);
-        px(b.x + 20, b.y + 92, pw2, 5, "#1b1436");
-        px(b.x + 20, b.y + 92, Math.round(pw2 * pr), 5, "#ffd23f");
+        pixelText(bestHard + "/" + sk.need, b.x + b.w / 2, b.y + 84, 9, "#cfc6f2", "center");
+        const pw2 = b.w - 24, pr = Math.min(1, bestHard / sk.need);
+        px(b.x + 12, b.y + 92, pw2, 5, "#1b1436");
+        px(b.x + 12, b.y + 92, Math.round(pw2 * pr), 5, "#ffd23f");
       }
       // 「技能」小按钮：点击弹出该形象的技能说明
       const sb = skillBtnRect(id);
@@ -1637,7 +1682,7 @@ function pressAt(p) {
       // 形象面板：点「技能」按钮看技能说明，点卡片即换装（面板保持打开），点空白处关闭
       if (showSkins) {
         let onCard = false;
-        for (const id of ["nailong", "snowking", "pacman"]) {
+        for (const id of ["nailong", "snowking", "pacman", "lion"]) {
           if (hit(p, skillBtnRect(id))) {
             sfxClick();
             showSkill = id;
