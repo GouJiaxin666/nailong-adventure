@@ -22,27 +22,10 @@
   #wrap {
     position: relative;
     width: min(96vw, calc(96vh * 16 / 9));
+    flex-shrink: 0;   /* 关键：竖屏旋转后布局宽度超出视口，禁止 flex 压缩（否则画面被缩小） */
   }
-  /* 移动端竖屏打开：整体旋转 90° 横屏游玩（旋转手机后自动变为全屏横屏） */
-  @media (orientation: portrait) and (pointer: coarse) {
-    #wrap {
-      width: min(calc(96vw * 16 / 9), 96vh);
-      transform: rotate(90deg);
-    }
-  }
-  /* 触屏设备：画布铺满全屏（桌面保留 96% 留边更好看） */
-  @media (pointer: coarse) {
-    #wrap {
-      width: min(100vw, calc(100vh * 16 / 9));
-      width: min(100vw, calc(100svh * 16 / 9));   /* 移动浏览器地址栏安全高度 */
-    }
-  }
-  @media (orientation: portrait) and (pointer: coarse) {
-    #wrap {
-      width: min(calc(100vw * 16 / 9), 100vh);
-      width: min(calc(100vw * 16 / 9), 100svh);
-    }
-  }
+  /* 触屏设备的画布尺寸与竖屏旋转由 JS fitWrap() 精确控制：
+     微信等内置浏览器的 vw/vh/svh 单位与媒体查询不可靠，CSS 方案会缩小显示 */
   canvas {
     display: block;
     width: 100%;
@@ -1033,7 +1016,21 @@ function pixelText(str, x, y, size, color, align = "left", shadow = true) {
 
 /* ================= 按钮 ================= */
 const IS_TOUCH = "ontouchstart" in window || navigator.maxTouchPoints > 0;
-const MQ_ROTATED = window.matchMedia("(orientation: portrait) and (pointer: coarse)");
+let wrapRotated = false;   // 竖屏下 #wrap 旋转 90° 模拟横屏
+
+/* 触屏设备布局：用 innerWidth/innerHeight 精确计算（内置浏览器 CSS 视口单位不可靠） */
+function layoutWrap(w, h, touch) {
+  const wrap = document.getElementById("wrap");
+  if (!touch) { wrap.style.width = ""; wrap.style.transform = ""; wrapRotated = false; return; }
+  wrapRotated = h > w;                                        // 竖屏 → 旋转 90°
+  const cw = wrapRotated ? Math.min(w * 16 / 9, h) : Math.min(w, h * 16 / 9);
+  wrap.style.width = Math.round(cw) + "px";
+  wrap.style.transform = wrapRotated ? "rotate(90deg)" : "none";
+}
+function fitWrap() { layoutWrap(innerWidth, innerHeight, IS_TOUCH); }
+addEventListener("resize", fitWrap);
+addEventListener("orientationchange", fitWrap);
+fitWrap();
 // 触屏设备：全部按钮放大，方便手指点按
 const buttons = IS_TOUCH ? {
   retry:  { x: 78,  y: 184, w: 150, h: 44, label: "再来一次" },
@@ -1342,8 +1339,8 @@ function canvasPos(e) {
   const r = canvas.getBoundingClientRect();
   const cx = (e.touches ? e.touches[0].clientX : e.clientX);
   const cy = (e.touches ? e.touches[0].clientY : e.clientY);
-  if (MQ_ROTATED.matches) {
-    // #wrap 被 CSS 旋转 90°：屏幕 x/y 与画布坐标互换
+  if (wrapRotated) {
+    // #wrap 被 JS 旋转 90°：屏幕 x/y 与画布坐标互换
     return {
       x: W / 2 + (cy - (r.top + r.height / 2)) * W / r.height,
       y: H / 2 - (cx - (r.left + r.width / 2)) * H / r.width
@@ -1392,7 +1389,7 @@ function hit(p, b) {
 
 function touchPos(t) {
   const r = canvas.getBoundingClientRect();
-  if (MQ_ROTATED.matches) {
+  if (wrapRotated) {
     return {
       x: W / 2 + (t.clientY - (r.top + r.height / 2)) * W / r.height,
       y: H / 2 - (t.clientX - (r.left + r.width / 2)) * H / r.width
