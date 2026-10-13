@@ -898,7 +898,7 @@ const PACMAN_SPR = { runA: PACMAN_BODY, runB: PACMAN_RUNB, jump: PACMAN_JUMP };
 const SKINS = {
   nailong: {
     name: "奶龙", need: 0, spr: SPR, pal: NAILONG_PAL,
-    skill: "死后复活·无敌1秒",
+    skillDesc: ["首次死亡后立即复活", "并获得 1 秒无敌时间"],
     pc: ["#ffc93c", "#efa01e"],                                   // 死亡碎片颜色
     blink: { fill: "#ffc93c", line: "#6e3a12", r: [0, -24, 10, 6], l: [1, -22, 8, 1] },
     dead: { col: "#6e3a12",
@@ -907,7 +907,7 @@ const SKINS = {
   },
   snowking: {
     name: "雪王", need: 6000, spr: SNOWKING_SPR, pal: SNOWKING_PAL,
-    skill: "1.2秒内免费再射",
+    skillDesc: ["发射子弹后的 1.2 秒内", "可免费再发射一次（不耗弹）"],
     pc: ["#ffffff", "#c9d8ea"],
     blink: { fill: "#ffffff", line: "#5a6b80", r: [12, -20, 10, 4], l: [13, -18, 8, 1] },
     dead: { col: "#1a1a1a",
@@ -916,7 +916,7 @@ const SKINS = {
   },
   pacman: {
     name: "吃豆人", need: 12000, spr: PACMAN_SPR, pal: PACMAN_PAL,
-    skill: "奶龙时刻+2秒",
+    skillDesc: ["奶龙时刻持续时间", "增加 2 秒"],
     pc: ["#ffd200", "#c9a227"],
     blink: { fill: "#ffd200", line: "#c9a227", r: [-4, -26, 4, 4], l: [-4, -23, 4, 1] },
     dead: { col: "#141414",
@@ -1232,6 +1232,9 @@ const buttons = IS_TOUCH ? {
 let hoverBtn = null;
 let showInfo = false;    // 详情面板是否展开
 let showSkins = false;   // 分数奖励（形象）面板是否展开
+let showSkill = null;    // 正在查看技能说明的形象 id（null=未打开）
+// 形象卡片底部「技能」小按钮的点击区（随卡片布局）
+function skillBtnRect(id) { const b = SKIN_CARD[id]; return { x: b.x + (b.w - 52) / 2, y: b.y + 102, w: 52, h: 13 }; }
 
 function drawButton(b, hover) {
   const c = hover ? "#ffe278" : C.btn;
@@ -1514,21 +1517,44 @@ function render() {
       drawSprite(sk.spr.runA, b.x + b.w / 2 - 24, b.y + 4, 3, sk.pal);
       ctx.globalAlpha = 1;
       pixelText(sk.name, b.x + b.w / 2, b.y + 56, 14, sel ? "#ffe873" : "#e8e2ff", "center", false);
-      // 技能说明（每个形象一句话）
-      pixelText("技:" + sk.skill, b.x + b.w / 2, b.y + 72, 9, "#b8e6a0", "center", false);
       if (unl) {
-        pixelText(sel ? "✓ 使用中" : "点击使用", b.x + b.w / 2, b.y + 88, 11, sel ? "#ffe873" : "#9fd8ff", "center");
+        pixelText(sel ? "✓ 使用中" : "点击使用", b.x + b.w / 2, b.y + 76, 11, sel ? "#ffe873" : "#9fd8ff", "center");
       } else {
-        pixelText("🔒 未解锁", b.x + b.w / 2, b.y + 86, 11, "#ff9aa9", "center");
-        pixelText("进阶最高 " + bestHard + " / " + sk.need, b.x + b.w / 2, b.y + 98, 9, "#cfc6f2", "center");
+        pixelText("🔒 未解锁", b.x + b.w / 2, b.y + 72, 11, "#ff9aa9", "center");
+        pixelText("进阶最高 " + bestHard + " / " + sk.need, b.x + b.w / 2, b.y + 84, 9, "#cfc6f2", "center");
         const pw2 = b.w - 40, pr = Math.min(1, bestHard / sk.need);
-        px(b.x + 20, b.y + 108, pw2, 5, "#1b1436");
-        px(b.x + 20, b.y + 108, Math.round(pw2 * pr), 5, "#ffd23f");
+        px(b.x + 20, b.y + 92, pw2, 5, "#1b1436");
+        px(b.x + 20, b.y + 92, Math.round(pw2 * pr), 5, "#ffd23f");
       }
+      // 「技能」小按钮：点击弹出该形象的技能说明
+      const sb = skillBtnRect(id);
+      px(sb.x, sb.y, sb.w, sb.h, "#3d2f6e");
+      px(sb.x, sb.y, sb.w, 1, "#7a68c0"); px(sb.x, sb.y + sb.h - 1, sb.w, 1, "#241b47");
+      pixelText("技能", sb.x + sb.w / 2, sb.y + 2, 9, "#cfc6f2", "center", false);
     }
 
     if (Math.floor(performance.now() / 400) % 2 === 0) {
       pixelText("点击卡片使用形象 · 点击空白处返回", W / 2, iy + ih - 14, 11, "#ff9aa9", "center", false);
+    }
+
+    /* ---- 技能说明弹窗（点卡片上的「技能」按钮打开） ---- */
+    if (showSkill && SKINS[showSkill]) {
+      const sk = SKINS[showSkill];
+      ctx.fillStyle = "rgba(10,6,28,.72)";
+      ctx.fillRect(0, 0, W, H);
+      const sw = 240, sh = 150, sx0 = (W - sw) / 2, sy0 = (H - sh) / 2 - 6;
+      px(sx0, sy0, sw, sh, C.panel);
+      px(sx0, sy0, sw, 3, C.panelE); px(sx0, sy0 + sh - 3, sw, 3, C.panelE);
+      px(sx0, sy0, 3, sh, C.panelE); px(sx0 + sw - 3, sy0, 3, sh, C.panelE);
+      pixelText(sk.name + " · 技能", W / 2, sy0 + 12, 17, "#ffd23f", "center", false);
+      // 形象预览（2 倍，未解锁也可查看技能）
+      drawSprite(sk.spr.runA, W / 2 - 16, sy0 + 34, 2, sk.pal);
+      sk.skillDesc.forEach((s, i) => {
+        pixelText(s, W / 2, sy0 + 76 + i * 15, 12, "#b8e6a0", "center", false);
+      });
+      if (Math.floor(performance.now() / 400) % 2 === 0) {
+        pixelText("点击任意处返回", W / 2, sy0 + sh - 20, 10, "#ff9aa9", "center", false);
+      }
     }
   }
 
@@ -1605,10 +1631,17 @@ function pressAt(p) {
   ensureAudio();
   if (state === STATE.MENU) {
     if (showInfo || showSkins) {
-      // 形象面板：点卡片即换装（面板保持打开），点空白处关闭
+      // 技能弹窗打开时：任意点击仅关闭弹窗
+      if (showSkill) { showSkill = null; return; }
+      // 形象面板：点「技能」按钮看技能说明，点卡片即换装（面板保持打开），点空白处关闭
       if (showSkins) {
         let onCard = false;
-        for (const id of ["nailong", "snowking"]) {
+        for (const id of ["nailong", "snowking", "pacman"]) {
+          if (hit(p, skillBtnRect(id))) {
+            sfxClick();
+            showSkill = id;
+            return;
+          }
           if (hit(p, SKIN_CARD[id])) {
             onCard = true;
             if (bestHard >= SKINS[id].need && skin !== id) {
