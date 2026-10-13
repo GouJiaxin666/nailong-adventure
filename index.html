@@ -144,6 +144,7 @@ function ensureAudio() {
   if (!actx) {
     try { actx = new (window.AudioContext || window.webkitAudioContext)(); }
     catch (e) { actx = null; }
+    if (actx) startMusic();   // 首次交互后启动背景音乐（浏览器自动播放策略要求）
   }
   if (actx && actx.state === "suspended") actx.resume();
 }
@@ -167,6 +168,67 @@ const sfxPickup = () => beep(660, 1180, 0.09, 0.06);
 const sfxFire = () => beep(900, 240, 0.1, 0.07);
 const sfxBoom = () => { beep(180, 40, 0.22, 0.09, "sawtooth"); beep(520, 90, 0.14, 0.05); };
 const sfxFever = () => { beep(523, 1046, 0.14, 0.07); beep(784, 1568, 0.2, 0.05); beep(659, 1318, 0.12, 0.05); };
+
+/* ================= 背景音乐（WebAudio 程序化芯片曲，无外链音频） ================= */
+/* 明快 C 大调 8 小节：主旋律(方波) + 低音(三角波)，奶龙时刻自动升八度并加速 */
+const MUS_BPM = 116;
+const MUS_STEPS = 64;   // 8 小节 × 8 个八分音符
+// 旋律：[相对 A4 半音数, 占几个八分音符]
+const MUS_MEL = [
+  [3,2],[7,2],[10,2],[7,2],          // C:  C5 E5 G5 E5
+  [8,2],[12,2],[10,2],[7,2],         // F:  F5 A5 G5 E5
+  [7,2],[10,2],[15,2],[10,2],        // C:  E5 G5 C6 G5
+  [12,1],[10,1],[8,2],[7,2],[5,2],   // G:  A5 G5 F5 E5 D5
+  [7,2],[12,2],[15,2],[12,2],        // Am: E5 A5 C6 A5
+  [12,2],[8,2],[12,2],[15,2],        // F:  A5 F5 A5 C6
+  [17,2],[14,2],[10,2],[14,2],       // G:  D6 B5 G5 B5
+  [15,3],[14,1],[15,2],[10,2]        // C:  C6 B5 C6 G5
+];
+const MUS_BASS = [-21, -26, -24, -28, -24, -28, -26, -21];   // C G A F A F G C（每小节根音）
+let musTimer = null;
+let musStep = 0;
+let musNext = 0;
+function musFreq(st) { return 440 * Math.pow(2, st / 12); }
+function musTone(t, freq, dur, vol, type) {
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type;
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(vol, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g); g.connect(actx.destination);
+  o.start(t); o.stop(t + dur + 0.05);
+}
+function musSchedule() {
+  if (!actx) return;
+  const stepLen = 60 / (fever > 0 ? 140 : MUS_BPM) / 2;   // 奶龙时刻：节奏加快
+  while (musNext < actx.currentTime + 0.3) {
+    const s = musStep % MUS_STEPS;
+    // 主旋律
+    let acc = 0;
+    for (const [st, len] of MUS_MEL) {
+      if (s === acc) {
+        musTone(musNext, musFreq(st + (fever > 0 ? 12 : 0)), len * stepLen * 0.92, 0.03, "square");
+        break;
+      }
+      acc += len;
+      if (s < acc) break;
+    }
+    // 低音：每小节第 1、3 拍
+    const bar = Math.floor(s / 8), pos = s % 8;
+    if (pos === 0 || pos === 4) {
+      musTone(musNext, musFreq(MUS_BASS[bar]), 3 * stepLen * 0.9, 0.05, "triangle");
+    }
+    musNext += stepLen;
+    musStep++;
+  }
+}
+function startMusic() {
+  if (musTimer || !actx) return;
+  musStep = 0;
+  musNext = actx.currentTime + 0.1;
+  musTimer = setInterval(musSchedule, 90);
+}
 
 /* ================= 初始化装饰 ================= */
 function initScenery() {
