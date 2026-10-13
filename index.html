@@ -134,6 +134,7 @@ let nextBirdX = 0;
 
 /* ---- 奶龙时刻（进阶模式限定） ---- */
 const FEVER_SPEED = 480;      // 固定超高速（超过正常上限 340）
+const DASH_SPEED = 640;       // 锤锤开局冲刺速度（比奶龙时刻更快）
 const FEVER_TIME = 8;         // 持续秒数
 let fever = 0;                // 剩余时间，>0 表示奶龙时刻中
 let feverGrace = 0;           // 结束后的无敌宽限（0.5s），期间半透明闪烁提示
@@ -515,9 +516,9 @@ function update(dt) {
     }
   }
   if (dashT > 0) {
-    // 锤锤技能：开局无敌冲刺，固定 480 高速
+    // 锤锤技能：开局无敌冲刺，固定 640 极速（快于奶龙时刻）
     dashT = Math.max(0, dashT - dt);
-    speed = FEVER_SPEED;
+    speed = DASH_SPEED;
   } else if (fever > 0) {
     fever = Math.max(0, fever - dt);
     if (fever === 0) {
