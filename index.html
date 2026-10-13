@@ -138,6 +138,7 @@ let nextBirdX = 0;
 const FEVER_SPEED = 480;      // 固定超高速（超过正常上限 340）
 const FEVER_TIME = 8;         // 持续秒数
 let fever = 0;                // 剩余时间，>0 表示奶龙时刻中
+let feverGrace = 0;           // 结束后的无敌宽限（0.5s），期间半透明闪烁提示
 let nextFeverAt = 2000;       // 下次触发分数（首次 2000，之后每次 +4000）
 
 /* ================= 音效（WebAudio 方波） ================= */
@@ -275,6 +276,7 @@ function resetGame() {
   nextBirdX = 400;
   fireCd = 0;
   fever = 0;
+  feverGrace = 0;
   feverBgmStop();
   nextFeverAt = 2000;
   player.y = GROUND_Y - player.h;
@@ -461,11 +463,16 @@ function update(dt) {
   }
   if (fever > 0) {
     fever = Math.max(0, fever - dt);
-    if (fever === 0) feverBgmStop();   // 奶龙时刻结束，停掉专属 BGM
+    if (fever === 0) {
+      feverBgmStop();          // 奶龙时刻结束，停掉专属 BGM
+      feverGrace = 0.5;        // 结束后保留 0.5s 无敌宽限
+      ammo = 3;                // 子弹补满
+    }
     speed = FEVER_SPEED;   // 固定高速，可超过正常上限
   } else {
     speed = Math.min(gameMode === "hard" ? 340 : MAX_SPEED, BASE_SPEED + worldX / 260 + ramp * 140);
   }
+  feverGrace = Math.max(0, feverGrace - dt);   // 宽限衰减
   worldX += speed * dt;
   score = Math.floor(worldX / 6) + scoreBonus;
 
@@ -613,8 +620,8 @@ function update(dt) {
     projectiles = projectiles.filter(p => !p.dead && p.x < W + 30);
   }
 
-  // 碰撞（包围盒与奶龙躯干对齐，比视觉略小，手感宽容；奶龙时刻无敌，直接穿过障碍）
-  if (fever <= 0) {
+  // 碰撞（包围盒与奶龙躯干对齐，比视觉略小，手感宽容；奶龙时刻及结束后 0.5s 宽限内无敌，直接穿过障碍）
+  if (fever <= 0 && feverGrace <= 0) {
     for (const o of obstacles) {
       const sx = o.wx - worldX + PLAYER_SCREEN_X;
       const ob = obstacleBox(o, sx);
@@ -1117,8 +1124,14 @@ function render() {
     }
   }
 
-  // 奶龙
-  drawNailong();
+  // 奶龙（结束后 0.5s 宽限：半透明闪烁提示无敌即将消失）
+  if (feverGrace > 0 && Math.floor(performance.now() / 80) % 2 === 0) {
+    ctx.globalAlpha = 0.45;
+    drawNailong();
+    ctx.globalAlpha = 1;
+  } else {
+    drawNailong();
+  }
 
   drawParticles();
 
