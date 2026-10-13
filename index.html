@@ -204,7 +204,9 @@ function musTone(t, freq, dur, vol, type) {
 }
 function musSchedule() {
   if (!actx) return;
-  const stepLen = 60 / (fever > 0 ? 140 : MUS_BPM) / 2;   // 奶龙时刻：节奏加快
+  if (fever > 0) return;   // 奶龙时刻：芯片乐静音（播放奶龙大笑）
+  if (musNext < actx.currentTime - 0.1) musNext = actx.currentTime + 0.05;   // 恢复时防音符爆发
+  const stepLen = 60 / MUS_BPM / 2;
   while (musNext < actx.currentTime + 0.3) {
     const s = musStep % MUS_STEPS;
     // 主旋律
@@ -232,6 +234,14 @@ function startMusic() {
   musNext = actx.currentTime + 0.1;
   musTimer = setInterval(musSchedule, 90);
 }
+
+/* ---- 奶龙时刻专属 BGM：文件夹内的「奶龙大笑」音频，触发期间芯片乐静音 ---- */
+const feverBgm = new Audio(encodeURI("纯音乐 - 奶龙大笑.mp3"));
+feverBgm.loop = true;
+feverBgm.volume = 0.75;
+feverBgm.preload = "auto";
+function feverBgmStart() { feverBgm.currentTime = 0; feverBgm.play().catch(() => {}); }
+function feverBgmStop() { feverBgm.pause(); }
 
 /* ================= 初始化装饰 ================= */
 function initScenery() {
@@ -265,6 +275,7 @@ function resetGame() {
   nextBirdX = 400;
   fireCd = 0;
   fever = 0;
+  feverBgmStop();
   nextFeverAt = 2000;
   player.y = GROUND_Y - player.h;
   player.vy = 0;
@@ -439,6 +450,7 @@ function update(dt) {
     fever = FEVER_TIME;
     nextFeverAt += 4000;
     sfxFever();
+    feverBgmStart();   // 播放奶龙大笑 BGM
     for (let i = 0; i < 22; i++) {
       particles.push({
         x: player.x + 10, y: player.y + 14,
@@ -449,6 +461,7 @@ function update(dt) {
   }
   if (fever > 0) {
     fever = Math.max(0, fever - dt);
+    if (fever === 0) feverBgmStop();   // 奶龙时刻结束，停掉专属 BGM
     speed = FEVER_SPEED;   // 固定高速，可超过正常上限
   } else {
     speed = Math.min(gameMode === "hard" ? 340 : MAX_SPEED, BASE_SPEED + worldX / 260 + ramp * 140);
