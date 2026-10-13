@@ -419,7 +419,8 @@ function update(dt) {
     const o = spawnObstacle(nextSpawnX);
     const heightBonus = o.h >= 150 ? 0.7 : o.h >= 90 ? 0.55 : o.h >= 60 ? 0.25 : o.type === "glovebox" ? 0.3 : 0;
     const gapTime = 1.0 + Math.random() * 0.7 + heightBonus;
-    const gap = speed * gapTime + 80;
+    let gap = speed * gapTime + 80;
+    if (fever > 0) gap *= 0.45;   // 奶龙时刻：障碍更密集（无敌+无限弹药，尽情扫射）
     nextSpawnX += gap;
   }
 
