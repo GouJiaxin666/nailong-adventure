@@ -131,6 +131,8 @@ let scoreBonus = 0;        // 击毁障碍奖励分（score = 路程分 + scoreB
 let projectiles = [];      // 飞行中的弹药
 let pickups = [];          // 场景中的子弹拾取物
 let nextPickupX = 0;
+let birds = [];            // 飞鸟（非障碍，子弹击中 +200 分）
+let nextBirdX = 0;
 
 /* ---- 奶龙时刻（进阶模式限定） ---- */
 const FEVER_SPEED = 430;      // 固定超高速（超过正常上限 340）
@@ -168,6 +170,7 @@ const sfxPickup = () => beep(660, 1180, 0.09, 0.06);
 const sfxFire = () => beep(900, 240, 0.1, 0.07);
 const sfxBoom = () => { beep(180, 40, 0.22, 0.09, "sawtooth"); beep(520, 90, 0.14, 0.05); };
 const sfxFever = () => { beep(523, 1046, 0.14, 0.07); beep(784, 1568, 0.2, 0.05); beep(659, 1318, 0.12, 0.05); };
+const sfxBird = () => { beep(1400, 700, 0.1, 0.06); beep(1800, 900, 0.08, 0.04); };
 
 /* ================= 背景音乐（WebAudio 程序化芯片曲，无外链音频） ================= */
 /* 明快 C 大调 8 小节：主旋律(方波) + 低音(三角波)，奶龙时刻自动升八度并加速 */
@@ -258,6 +261,8 @@ function resetGame() {
   projectiles = [];
   pickups = [];
   nextPickupX = 520;
+  birds = [];
+  nextBirdX = 400;
   fever = 0;
   nextFeverAt = 2000;
   player.y = GROUND_Y - player.h;
@@ -527,8 +532,41 @@ function update(dt) {
     }
     pickups = pickups.filter(pk => !pk.dead && pk.wx - worldX + PLAYER_SCREEN_X > -30);
 
+    // 飞鸟：天空中随机刷新（非障碍，不参与玩家碰撞），自右向左飞
+    while (nextBirdX < worldX + W + 100) {
+      birds.push({
+        wx: nextBirdX,
+        y: GROUND_Y - 55 - Math.random() * 85,      // 天空高度带
+        vx: 60 + Math.random() * 50,                // 相对世界向左的速度
+        t: Math.random() * 6, dead: false
+      });
+      nextBirdX += speed * (2.5 + Math.random() * 2.5);
+    }
+    for (const b of birds) { b.t += dt; b.wx -= b.vx * dt; }
+    birds = birds.filter(b => !b.dead && b.wx - worldX + PLAYER_SCREEN_X > -30);
+
     for (const p of projectiles) p.x += p.vx * dt;
     for (const p of projectiles) {
+      if (p.dead) continue;
+      // 命中飞鸟：+200 分，羽毛四散
+      for (const b of birds) {
+        if (b.dead) continue;
+        const bsx = b.wx - worldX + PLAYER_SCREEN_X;
+        if (p.x + 8 > bsx - 2 && p.x < bsx + 18 && p.y + 4 > b.y - 6 && p.y < b.y + 8) {
+          p.dead = true;
+          b.dead = true;
+          scoreBonus += 200;
+          sfxBird();
+          for (let i = 0; i < 10; i++) {
+            particles.push({
+              x: bsx + 8, y: b.y,
+              vx: (Math.random() - 0.5) * 200, vy: -Math.random() * 140 - 20,
+              life: 0.5 + Math.random() * 0.3, color: i % 3 ? "#ffffff" : "#ffd23f", size: 2 + Math.random() * 2
+            });
+          }
+          break;
+        }
+      }
       if (p.dead) continue;
       for (const o of obstacles) {
         const sx = o.wx - worldX + PLAYER_SCREEN_X;
@@ -992,6 +1030,28 @@ function drawProjectile(p) {
   px(p.x, p.y, 2, 4, "#c98f1e");
 }
 
+/* 飞鸟：白色小鸟，翅膀上下扇动（两帧），自右向左飞 */
+function drawBird(sx, y, t) {
+  const flap = Math.floor(t * 8) % 2 === 0;   // true=翅膀上扬
+  // 身体
+  px(sx + 3, y, 10, 5, "#ffffff");
+  px(sx + 3, y + 4, 8, 2, "#dfe8f0");          // 腹部阴影
+  // 头 + 喙 + 眼
+  px(sx + 11, y - 2, 4, 4, "#ffffff");
+  px(sx + 15, y - 1, 3, 2, "#f0a030");         // 喙
+  px(sx + 13, y - 1, 1, 1, "#161616");         // 眼
+  // 尾羽
+  px(sx, y + 1, 3, 2, "#cfd8e4");
+  // 翅膀（两帧扇动）
+  if (flap) {
+    px(sx + 5, y - 5, 4, 5, "#ffffff");
+    px(sx + 6, y - 7, 3, 2, "#dfe8f0");
+  } else {
+    px(sx + 5, y + 3, 4, 5, "#cfd8e4");
+    px(sx + 6, y + 7, 3, 2, "#b8c4d4");
+  }
+}
+
 function render() {
   const cam = state === STATE.MENU ? menuScroll : worldX - PLAYER_SCREEN_X;
   drawBackground(cam);
@@ -1015,6 +1075,11 @@ function render() {
       if (sx > -20 && sx < W + 20) drawPickup(sx, pk.y + Math.sin(pk.t * 4) * 3, pk.t);
     }
     for (const p of projectiles) drawProjectile(p);
+    // 飞鸟（天空中，非障碍）
+    for (const b of birds) {
+      const bsx = b.wx - worldX + PLAYER_SCREEN_X;
+      if (bsx > -30 && bsx < W + 30) drawBird(bsx, b.y + Math.sin(b.t * 3) * 2, b.t);
+    }
   }
 
   // 菜单场景放一个装饰仙人掌在远处滚动
