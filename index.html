@@ -135,7 +135,7 @@ let birds = [];            // 飞鸟（非障碍，子弹击中 +200 分）
 let nextBirdX = 0;
 
 /* ---- 奶龙时刻（进阶模式限定） ---- */
-const FEVER_SPEED = 430;      // 固定超高速（超过正常上限 340）
+const FEVER_SPEED = 480;      // 固定超高速（超过正常上限 340）
 const FEVER_TIME = 8;         // 持续秒数
 let fever = 0;                // 剩余时间，>0 表示奶龙时刻中
 let nextFeverAt = 2000;       // 下次触发分数（首次 2000，之后每次 +4000）
@@ -263,6 +263,7 @@ function resetGame() {
   nextPickupX = 520;
   birds = [];
   nextBirdX = 400;
+  fireCd = 0;
   fever = 0;
   nextFeverAt = 2000;
   player.y = GROUND_Y - player.h;
@@ -320,13 +321,17 @@ function doJump() {
   }
 }
 
+let fireCd = 0;            // 发射冷却（防止奶龙时刻机枪式清屏）
+
 /* 进阶模式：发射弹药（消耗 1 枚；奶龙时刻中无限弹药），摧毁命中的第一个障碍 */
 function fire() {
   if (state !== STATE.PLAY || gameMode !== "hard" || player.dead) return;
+  if (fireCd > 0) return;          // 0.3s 冷却
   if (fever <= 0) {
     if (ammo <= 0) return;
     ammo--;
   }
+  fireCd = 0.45;
   projectiles.push({ x: player.x + 20, y: player.y + 12, vx: 520, dead: false });
   sfxFire();
   for (let i = 0; i < 4; i++) {
@@ -458,6 +463,7 @@ function update(dt) {
   player.blink = Math.max(0, player.blink - dt);
   if (Math.random() < dt * 0.5) player.blink = 0.12;
   player.squash = Math.max(0, player.squash - dt);
+  fireCd = Math.max(0, fireCd - dt);   // 发射冷却衰减
 
   // 纵向物理
   player.vy += GRAVITY * dt;
@@ -487,7 +493,7 @@ function update(dt) {
     const heightBonus = o.h >= 150 ? 0.7 : o.h >= 90 ? 0.55 : o.h >= 60 ? 0.25 : o.type === "glovebox" ? 0.3 : 0;
     const gapTime = 1.0 + Math.random() * 0.7 + heightBonus;
     let gap = speed * gapTime + 80;
-    if (fever > 0) gap *= 0.45;   // 奶龙时刻：障碍更密集（无敌+无限弹药，尽情扫射）
+    if (fever > 0) gap *= 0.22;   // 奶龙时刻：障碍更密集（生成快于射杀，屏幕持续有障碍）
     nextSpawnX += gap;
   }
 
