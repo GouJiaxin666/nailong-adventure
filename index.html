@@ -204,6 +204,7 @@ function musTone(t, freq, dur, vol, type) {
 function musSchedule() {
   if (!actx) return;
   if (fever > 0) return;   // 奶龙时刻：芯片乐静音（播放奶龙大笑）
+  if (introPlaying) return;   // 开场白「我是奶龙」期间静音芯片乐，结束后自动恢复
   if (musNext < actx.currentTime - 0.1) musNext = actx.currentTime + 0.05;   // 恢复时防音符爆发
   const stepLen = 60 / MUS_BPM / 2;
   while (musNext < actx.currentTime + 0.3) {
@@ -242,6 +243,19 @@ feverBgm.preload = "auto";
 function feverBgmStart() { feverBgm.currentTime = 0; feverBgm.play().catch(() => {}); }
 function feverBgmStop() { feverBgm.pause(); }
 
+/* ---- 游戏开场白：「我是奶龙」语音，播完后接入正常芯片乐 ---- */
+const introVoice = new Audio(encodeURI("我是奶龙.mp3"));
+introVoice.volume = 0.85;
+introVoice.preload = "auto";
+let introPlaying = false;
+introVoice.addEventListener("ended", () => { introPlaying = false; });
+function introVoiceStart() {
+  introVoice.currentTime = 0;
+  introPlaying = true;
+  introVoice.play().catch(() => { introPlaying = false; });
+}
+function introVoiceStop() { introVoice.pause(); introPlaying = false; }
+
 /* ================= 初始化装饰 ================= */
 function initScenery() {
   clouds = [];
@@ -276,6 +290,7 @@ function resetGame() {
   fever = 0;
   feverGrace = 0;
   feverBgmStop();
+  introVoiceStop();
   nextFeverAt = 2000;
   newUnlock = false;
   player.y = GROUND_Y - player.h;
@@ -289,6 +304,7 @@ function startGame(mode) {
   gameMode = mode || "normal";
   resetGame();
   state = STATE.PLAY;
+  introVoiceStart();   // 开场白：先播「我是奶龙」语音，结束后自动接入正常芯片乐
 }
 function gameOver() {
   if (player.dead) return;
