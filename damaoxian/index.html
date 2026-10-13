@@ -1,0 +1,1796 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>奶龙大冒险</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #1b1436;
+    overflow: hidden;
+    font-family: "Courier New", monospace;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background:
+      radial-gradient(circle at 50% 20%, #34255f 0%, #1b1436 70%);
+  }
+  #wrap {
+    position: relative;
+    width: min(96vw, calc(96vh * 16 / 9));
+    flex-shrink: 0;   /* 关键：竖屏旋转后布局宽度超出视口，禁止 flex 压缩（否则画面被缩小） */
+  }
+  /* 触屏设备的画布尺寸与竖屏旋转由 JS fitWrap() 精确控制：
+     微信等内置浏览器的 vw/vh/svh 单位与媒体查询不可靠，CSS 方案会缩小显示 */
+  canvas {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    border: 4px solid #0d0a1f;
+    border-radius: 6px;
+    box-shadow: 0 0 0 4px #4a3a86, 0 18px 50px rgba(0,0,0,.6);
+    cursor: pointer;
+    background: #8fd3ff;
+    touch-action: none;   /* 移动端禁下拉刷新/双击缩放 */
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="480" height="270"></canvas>
+</div>
+
+<script>
+"use strict";
+/* ================= 基础 ================= */
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+ctx.imageSmoothingEnabled = false;
+
+const W = 480, H = 270;
+const GROUND_Y = 224;           // 地面顶面 y
+const PLAYER_SCREEN_X = 92;     // 奶龙固定在屏幕上的 x
+const GRAVITY = 1500;
+const JUMP_V = [-420, -470, -520];   // 三段跳初速度：一次比一次高
+const BASE_SPEED = 135;
+const MAX_SPEED = 250;
+
+/* ================= 调色板 ================= */
+const C = {
+  yellow:  "#ffd23f",
+  yellowD: "#e0a32e",
+  belly:   "#fff3d0",
+  pink:    "#ff9aa9",
+  eye:     "#332b22",
+  cactus:  "#3fa34d",
+  cactusD: "#2b7a38",
+  rock:    "#9aa0a8",
+  rockD:   "#6f7680",
+  grass:   "#7cc353",
+  grassD:  "#55973a",
+  dirt:    "#c98f4e",
+  dirtD:   "#a36d33",
+  cloud:   "#ffffff",
+  hillA:   "#8fd07a",
+  hillB:   "#6fb464",
+  panel:   "#241b47",
+  panelE:  "#ffd23f",
+  btn:     "#ffd23f",
+  btnD:    "#c98a1e",
+  btnText: "#3a2500",
+  text:    "#ffffff"
+};
+
+/* ================= 状态 ================= */
+const STATE = { MENU: 0, PLAY: 1, OVER: 2 };
+let state = STATE.MENU;
+
+let worldX = 0;          // 奶龙的世界坐标（也是路程）
+let speed = BASE_SPEED;
+let score = 0;
+let best = +(localStorage.getItem("nailong_best") || 0);
+let bestHard = +(localStorage.getItem("nailong_best_hard") || 0);   // 进阶模式历史最高分（解锁形象用）
+let newUnlock = null;                                               // 本局刚解锁的形象 id（null=无）
+
+const player = {
+  x: PLAYER_SCREEN_X, y: 0,
+  w: 22, h: 28,          // 碰撞盒（视觉 sprite 为 32×32）
+  vy: 0,
+  jumps: 0,              // 已用跳跃次数（落地清零）
+  grounded: true,
+  runFrame: 0,
+  runTimer: 0,
+  blink: 0,
+  squash: 0,             // 落地压扁动画计时
+  dead: false
+};
+
+let obstacles = [];
+let nextSpawnX = 0;
+let menuScroll = 0;
+let clouds = [];
+let hills = [];
+let particles = [];
+let overTimer = 0;       // 结束面板延迟
+let finalScore = 0;
+
+/* ---- 进阶模式状态 ---- */
+let gameMode = "normal";   // "normal" | "hard"
+let playTime = 0;          // 本局已进行时间（用于提速曲线）
+let bugSpeedMul = 1;       // 刺虫速度倍率（随提速曲线）
+let ammo = 0;              // 已储存弹药（上限 3）
+let scoreBonus = 0;        // 击毁障碍奖励分（score = 路程分 + scoreBonus）
+let projectiles = [];      // 飞行中的弹药
+let pickups = [];          // 场景中的子弹拾取物
+let nextPickupX = 0;
+let birds = [];            // 飞鸟（非障碍，子弹击中 +200 分）
+let nextBirdX = 0;
+
+/* ---- 奶龙时刻（进阶模式限定） ---- */
+const FEVER_SPEED = 480;      // 固定超高速（超过正常上限 340）
+const DASH_SPEED = 640;       // 锤锤开局冲刺速度（比奶龙时刻更快）
+const FEVER_TIME = 8;         // 持续秒数
+let fever = 0;                // 剩余时间，>0 表示奶龙时刻中
+let feverGrace = 0;           // 结束后的无敌宽限（0.5s），期间半透明闪烁提示
+let nextFeverAt = 2000;       // 下次触发分数（首次 2000，之后每次 +4000）
+
+/* ================= 音效（WebAudio 方波） ================= */
+let actx = null;
+function ensureAudio() {
+  if (!actx) {
+    try { actx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch (e) { actx = null; }
+    if (actx) startMusic();   // 首次交互后启动背景音乐（浏览器自动播放策略要求）
+  }
+  if (actx && actx.state === "suspended") actx.resume();
+}
+function beep(f0, f1, dur, vol = 0.06, type = "square") {
+  if (!actx) return;
+  const t = actx.currentTime;
+  const osc = actx.createOscillator();
+  const g = actx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(f0, t);
+  osc.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  osc.connect(g); g.connect(actx.destination);
+  osc.start(t); osc.stop(t + dur);
+}
+const sfxJump = () => beep(320, 640, 0.13);
+const sfxDie  = () => { beep(420, 70, 0.45, 0.08, "sawtooth"); };
+const sfxClick = () => beep(660, 880, 0.07, 0.05);
+const sfxPickup = () => beep(660, 1180, 0.09, 0.06);
+const sfxFire = () => beep(900, 240, 0.1, 0.07);
+const sfxBoom = () => { beep(180, 40, 0.22, 0.09, "sawtooth"); beep(520, 90, 0.14, 0.05); };
+const sfxFever = () => { beep(523, 1046, 0.14, 0.07); beep(784, 1568, 0.2, 0.05); beep(659, 1318, 0.12, 0.05); };
+const sfxBird = () => { beep(1400, 700, 0.1, 0.06); beep(1800, 900, 0.08, 0.04); };
+
+/* ================= 背景音乐（WebAudio 程序化芯片曲，无外链音频） ================= */
+/* 明快 C 大调 8 小节：主旋律(方波) + 低音(三角波)，奶龙时刻自动升八度并加速 */
+const MUS_BPM = 116;
+const MUS_STEPS = 64;   // 8 小节 × 8 个八分音符
+// 旋律：[相对 A4 半音数, 占几个八分音符]
+const MUS_MEL = [
+  [3,2],[7,2],[10,2],[7,2],          // C:  C5 E5 G5 E5
+  [8,2],[12,2],[10,2],[7,2],         // F:  F5 A5 G5 E5
+  [7,2],[10,2],[15,2],[10,2],        // C:  E5 G5 C6 G5
+  [12,1],[10,1],[8,2],[7,2],[5,2],   // G:  A5 G5 F5 E5 D5
+  [7,2],[12,2],[15,2],[12,2],        // Am: E5 A5 C6 A5
+  [12,2],[8,2],[12,2],[15,2],        // F:  A5 F5 A5 C6
+  [17,2],[14,2],[10,2],[14,2],       // G:  D6 B5 G5 B5
+  [15,3],[14,1],[15,2],[10,2]        // C:  C6 B5 C6 G5
+];
+const MUS_BASS = [-21, -26, -24, -28, -24, -28, -26, -21];   // C G A F A F G C（每小节根音）
+let musTimer = null;
+let musStep = 0;
+let musNext = 0;
+function musFreq(st) { return 440 * Math.pow(2, st / 12); }
+function musTone(t, freq, dur, vol, type) {
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type;
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(vol, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g); g.connect(actx.destination);
+  o.start(t); o.stop(t + dur + 0.05);
+}
+function musSchedule() {
+  if (!actx) return;
+  if (fever > 0) return;   // 奶龙时刻：芯片乐静音（播放奶龙大笑）
+  if (introPlaying) return;   // 开场白「我是奶龙」期间静音芯片乐，结束后自动恢复
+  if (musNext < actx.currentTime - 0.1) musNext = actx.currentTime + 0.05;   // 恢复时防音符爆发
+  const stepLen = 60 / MUS_BPM / 2;
+  while (musNext < actx.currentTime + 0.3) {
+    const s = musStep % MUS_STEPS;
+    // 主旋律
+    let acc = 0;
+    for (const [st, len] of MUS_MEL) {
+      if (s === acc) {
+        musTone(musNext, musFreq(st + (fever > 0 ? 12 : 0)), len * stepLen * 0.92, 0.03, "square");
+        break;
+      }
+      acc += len;
+      if (s < acc) break;
+    }
+    // 低音：每小节第 1、3 拍
+    const bar = Math.floor(s / 8), pos = s % 8;
+    if (pos === 0 || pos === 4) {
+      musTone(musNext, musFreq(MUS_BASS[bar]), 3 * stepLen * 0.9, 0.05, "triangle");
+    }
+    musNext += stepLen;
+    musStep++;
+  }
+}
+function startMusic() {
+  if (musTimer || !actx) return;
+  musStep = 0;
+  musNext = actx.currentTime + 0.1;
+  musTimer = setInterval(musSchedule, 90);
+}
+
+/* ---- 奶龙时刻专属 BGM：文件夹内的「奶龙大笑」音频，触发期间芯片乐静音 ---- */
+const feverBgm = new Audio(encodeURI("纯音乐 - 奶龙大笑.mp3"));
+feverBgm.loop = true;
+feverBgm.volume = 0.75;
+feverBgm.preload = "auto";
+function feverBgmStart() { feverBgm.currentTime = 0; feverBgm.play().catch(() => {}); }
+function feverBgmStop() { feverBgm.pause(); }
+
+/* ---- 游戏开场白：「我是奶龙」语音，播完后接入正常芯片乐 ---- */
+const introVoice = new Audio(encodeURI("我是奶龙.mp3"));
+introVoice.volume = 0.85;
+introVoice.preload = "auto";
+let introPlaying = false;
+introVoice.addEventListener("ended", () => { introPlaying = false; });
+function introVoiceStart() {
+  introVoice.currentTime = 0;
+  introPlaying = true;
+  introVoice.play().catch(() => { introPlaying = false; });
+}
+function introVoiceStop() { introVoice.pause(); introPlaying = false; }
+
+/* ================= 初始化装饰 ================= */
+function initScenery() {
+  clouds = [];
+  for (let i = 0; i < 6; i++) {
+    clouds.push({ x: Math.random() * 900, y: 24 + Math.random() * 70, s: 0.7 + Math.random() * 0.7 });
+  }
+  hills = [];
+  for (let i = 0; i < 8; i++) {
+    hills.push({ x: i * 150 + Math.random() * 60, h: 30 + Math.random() * 34, layer: i % 2 });
+  }
+}
+initScenery();
+
+/* ================= 游戏流程 ================= */
+function resetGame() {
+  worldX = 0;
+  speed = BASE_SPEED;
+  score = 0;
+  obstacles = [];
+  particles = [];
+  nextSpawnX = 340;
+  playTime = 0;
+  bugSpeedMul = 1;
+  ammo = 0;
+  scoreBonus = 0;
+  projectiles = [];
+  pickups = [];
+  nextPickupX = 520;
+  birds = [];
+  nextBirdX = 400;
+  fireCd = 0;
+  fever = 0;
+  feverGrace = 0;
+  feverBgmStop();
+  introVoiceStop();
+  nextFeverAt = 2000;
+  newUnlock = null;
+  reviveUsed = false;      // 奶龙技能：复活机会每局重置
+  reviveInvuln = 0;
+  freeShotT = 0;           // 雪王技能：免费再射窗口清空
+  freeShotUsed = false;
+  feverDur = FEVER_TIME;
+  dashT = skin === "lion" ? 5 : 0;   // 锤锤技能：开局 5 秒无敌冲刺
+  player.y = GROUND_Y - player.h;
+  player.vy = 0;
+  player.jumps = 0;
+  player.grounded = true;
+  player.dead = false;
+  overTimer = 0;
+}
+function startGame(mode) {
+  gameMode = mode || "normal";
+  resetGame();
+  state = STATE.PLAY;
+  introVoiceStart();   // 开场白：先播「我是奶龙」语音，结束后自动接入正常芯片乐
+}
+function gameOver() {
+  if (player.dead) return;
+  // 奶龙技能：本局首次死亡 → 立即复活并无敌 1 秒
+  if (skin === "nailong" && !reviveUsed) {
+    reviveUsed = true;
+    reviveInvuln = 1.0;
+    sfxJump();
+    for (let i = 0; i < 12; i++) {
+      particles.push({
+        x: player.x + 12, y: player.y + 10,
+        vx: (Math.random() - 0.5) * 200, vy: -Math.random() * 180 - 30,
+        life: 0.5 + Math.random() * 0.3, color: i % 2 ? "#ffe873" : "#ffffff", size: 2
+      });
+    }
+    return;
+  }
+  player.dead = true;
+  finalScore = score;
+  if (score > best) {
+    best = score;
+    localStorage.setItem("nailong_best", best);
+  }
+  // 进阶模式最高分记录 → 解锁形象（6000 雪王 / 12000 吃豆人 / 18000 锤锤，可同局连解，只提示最高档）
+  if (gameMode === "hard" && score > bestHard) {
+    if (bestHard < 18000 && score >= 18000) newUnlock = "lion";
+    else if (bestHard < 12000 && score >= 12000) newUnlock = "pacman";
+    else if (bestHard < 6000 && score >= 6000) newUnlock = "snowking";
+    bestHard = score;
+    localStorage.setItem("nailong_best_hard", bestHard);
+  }
+  sfxDie();
+  // 死亡碎片（颜色随形象）
+  const skc = SKINS[skin].pc;
+  for (let i = 0; i < 14; i++) {
+    particles.push({
+      x: player.x + 12, y: player.y + 10,
+      vx: (Math.random() - 0.5) * 220,
+      vy: -Math.random() * 220 - 40,
+      life: 0.7 + Math.random() * 0.4,
+      color: Math.random() < 0.5 ? skc[0] : skc[1],
+      size: 2 + Math.random() * 2
+    });
+  }
+  overTimer = 0;
+  state = STATE.OVER;
+}
+function doJump() {
+  if (player.dead) return;
+  if (player.jumps < 3) {
+    player.vy = JUMP_V[player.jumps];
+    player.jumps++;
+    player.grounded = false;
+    sfxJump();
+    // 起跳小烟尘
+    for (let i = 0; i < 5; i++) {
+      particles.push({
+        x: player.x + 6 + Math.random() * 12,
+        y: GROUND_Y - 2,
+        vx: -speed * 0.4 + (Math.random() - 0.5) * 50,
+        vy: -Math.random() * 50,
+        life: 0.35, color: "#e8d9b8", size: 2
+      });
+    }
+  }
+}
+
+let fireCd = 0;            // 发射冷却（防止奶龙时刻机枪式清屏）
+
+/* 进阶模式：发射弹药（消耗 1 枚；奶龙时刻中无限弹药），摧毁命中的第一个障碍
+   雪王技能：发射后 1.2s 内可免费再射一次（不耗弹，但仍受 0.3s 内置冷却限制） */
+function fire() {
+  if (state !== STATE.PLAY || gameMode !== "hard" || player.dead) return;
+  if (fireCd > 0) return;          // 0.3s 冷却
+  if (fever <= 0) {
+    if (skin === "snowking" && freeShotT > 0 && !freeShotUsed) {
+      freeShotUsed = true;         // 雪王免费射击：不消耗子弹
+    } else {
+      if (ammo <= 0) return;
+      ammo--;
+      if (skin === "snowking") { freeShotT = 1.2; freeShotUsed = false; }   // 开启免费窗口
+    }
+  }
+  fireCd = 0.3;
+  projectiles.push({ x: player.x + 20, y: player.y + 12, vx: 520, dead: false });
+  sfxFire();
+  for (let i = 0; i < 4; i++) {
+    particles.push({
+      x: player.x + 22, y: player.y + 14,
+      vx: 60 + Math.random() * 60, vy: (Math.random() - 0.5) * 60,
+      life: 0.18, color: "#fff0b0", size: 2
+    });
+  }
+}
+/* 拳套盒：奶龙靠近才启动。周期：弹出 0.12s → 保持弹出 1.0s → 收回 0.18s → 保持收回 1.5s */
+const GLOVE_CYCLE = 2.8;
+const GLOVE_TRIGGER = 210;   // 奶龙距盒此距离内才触发弹出
+function gloveExt(o) {
+  // 返回 0..1 的拳套伸出量（t<=0 未触发）
+  if (o.t <= 0) return 0;
+  const c = o.t % GLOVE_CYCLE;
+  if (c < 0.12) return c / 0.12;
+  if (c < 1.12) return 1;
+  if (c < 1.3) return 1 - (c - 1.12) / 0.18;
+  return 0;
+}
+/* 各类障碍的碰撞盒（sx 为障碍在屏幕上的左缘） */
+function obstacleBox(o, sx) {
+  if (o.type === "glovebox") {
+    // 箱体始终致命；拳套弹出时危险区向上延伸
+    const h = o.h + Math.round(gloveExt(o) * 44);
+    return { x: sx + 2, y: GROUND_Y - h + 2, w: o.w - 4, h: h - 2 };
+  }
+  if (o.type === "thorn") {
+    // 荆棘：低矮但宽，判定略收窄保证手感
+    return { x: sx + 3, y: GROUND_Y - o.h + 3, w: o.w - 6, h: o.h - 3 };
+  }
+  return { x: sx + 2, y: GROUND_Y - o.h + 2, w: o.w - 4, h: o.h - 3 };
+}
+function spawnObstacle(wx) {
+  // 三档高度（地面到障碍顶）：
+  //  低 28~48：一跳即可越过（一跳极限 ≈ 59）
+  //  中 100~115：需要两段跳（两跳可达 ≈ 132）
+  //  高 150~180：必须三段跳（三段极限 ≈ 222，仍高于最高障碍）
+  const r = Math.random();
+  let o;
+  if (score < 90) {
+    // 新手期：只有低障碍
+    if (r < 0.45) o = { type: "rock", wx, w: 15, h: Math.round(28 + Math.random() * 12) };
+    else o = { type: "cactus", wx, w: 14, h: Math.round(34 + Math.random() * 14) };
+  } else if (score < 260) {
+    // 中期：低 + 中 + 荆棘
+    if (r < 0.34) o = { type: "cactus", wx, w: 14, h: Math.round(100 + Math.random() * 15) };
+    else if (r < 0.52) o = { type: "thorn", wx, w: Math.round(36 + Math.random() * 28), h: Math.round(10 + Math.random() * 3) };
+    else if (r < 0.74) o = { type: "rock", wx, w: 15, h: Math.round(28 + Math.random() * 12) };
+    else o = { type: "cactus", wx, w: 14, h: Math.round(34 + Math.random() * 14) };
+  } else {
+    // 后期：低 / 中 / 高 + 荆棘 / 拳套盒 / 刺虫
+    if (r < 0.14) o = { type: "cactus", wx, w: 15, h: Math.round(150 + Math.random() * 30), tier: 3 };
+    else if (r < 0.32) o = { type: "cactus", wx, w: 14, h: Math.round(100 + Math.random() * 15), tier: 2 };
+    else if (r < 0.48) o = { type: "thorn", wx, w: Math.round(52 + Math.random() * 36), h: Math.round(10 + Math.random() * 3), tier: 1 };
+    else if (r < 0.62) o = { type: "glovebox", wx, w: 18, h: 18, t: 0 };
+    else if (r < 0.76) o = { type: "spikebug", wx, w: 24, h: 13, t: Math.random() * 10, vx: 55 + Math.random() * 25 };
+    else if (r < 0.88) o = { type: "rock", wx, w: 15, h: Math.round(28 + Math.random() * 12), tier: 1 };
+    else o = { type: "cactus", wx, w: 14, h: Math.round(34 + Math.random() * 14), tier: 1 };
+  }
+  obstacles.push(o);
+  // 已存在的子弹若与新障碍重叠，挪到障碍之后（障碍最小间距 > 215px，不会撞上下一个）
+  for (const pk of pickups) {
+    if (pk.wx + 12 > o.wx - 8 && pk.wx - 4 < o.wx + o.w + 8) pk.wx = o.wx + o.w + 40;
+  }
+  return o;
+}
+
+/* ================= 更新 ================= */
+function update(dt) {
+  // 粒子始终更新
+  updateParticles(dt);
+
+  if (state === STATE.MENU) {
+    menuScroll += 40 * dt;
+    player.runTimer += dt;
+    if (player.runTimer > 0.16) { player.runTimer = 0; player.runFrame ^= 1; }
+    player.blink = Math.max(0, player.blink - dt);
+    if (Math.random() < dt * 0.5) player.blink = 0.14;
+    player.squash = Math.max(0, player.squash - dt);
+    return;
+  }
+
+  if (state === STATE.OVER) {
+    overTimer += dt;
+    // 奶龙倒地后继续受重力
+    player.vy += GRAVITY * dt;
+    player.y += player.vy * dt;
+    if (player.y > GROUND_Y - player.h) {
+      player.y = GROUND_Y - player.h;
+      player.vy = 0;
+    }
+    return;
+  }
+
+  /* ---- PLAY ---- */
+  playTime += dt;
+  // 进阶模式：20s 后开始提速，80s 达到 340；120s 后再用 20s 逐渐提高至 360（普通模式速度曲线不变）
+  const ramp = gameMode === "hard" ? Math.min(1, Math.max(0, (playTime - 20) / 60)) : 0;
+  const lateRamp = gameMode === "hard" ? Math.min(1, Math.max(0, (playTime - 120) / 20)) : 0;
+  bugSpeedMul = 1 + ramp * 0.7;
+  // 奶龙时刻：到达分数阈值触发（首次 2000，之后每 +4000 一次），8 秒固定超高速 + 无敌 + 无限弹药
+  // 吃豆人技能：奶龙时刻持续时间 +2 秒
+  if (gameMode === "hard" && fever <= 0 && score >= nextFeverAt) {
+    feverDur = FEVER_TIME + (skin === "pacman" ? 2 : 0);
+    fever = feverDur;
+    nextFeverAt += 4000;
+    sfxFever();
+    feverBgmStart();   // 播放奶龙大笑 BGM
+    for (let i = 0; i < 22; i++) {
+      particles.push({
+        x: player.x + 10, y: player.y + 14,
+        vx: (Math.random() - 0.5) * 320, vy: -Math.random() * 260,
+        life: 0.6 + Math.random() * 0.4, color: i % 2 ? "#ffd23f" : "#fff3c0", size: 2 + Math.random() * 2
+      });
+    }
+  }
+  if (dashT > 0) {
+    // 锤锤技能：开局无敌冲刺，固定 640 极速（快于奶龙时刻）
+    dashT = Math.max(0, dashT - dt);
+    speed = DASH_SPEED;
+  } else if (fever > 0) {
+    fever = Math.max(0, fever - dt);
+    if (fever === 0) {
+      feverBgmStop();          // 奶龙时刻结束，停掉专属 BGM
+      feverGrace = 0.5;        // 结束后保留 0.5s 无敌宽限
+      ammo = 3;                // 子弹补满
+    }
+    speed = FEVER_SPEED;   // 固定高速，可超过正常上限
+  } else {
+    speed = Math.min(gameMode === "hard" ? 340 + lateRamp * 20 : MAX_SPEED, BASE_SPEED + worldX / 260 + ramp * 140 + lateRamp * 20);
+  }
+  feverGrace = Math.max(0, feverGrace - dt);   // 宽限衰减
+  reviveInvuln = Math.max(0, reviveInvuln - dt);   // 奶龙复活无敌衰减
+  freeShotT = Math.max(0, freeShotT - dt);         // 雪王免费再射窗口衰减
+  worldX += speed * dt;
+  score = Math.floor(worldX / 6) + scoreBonus;
+
+  // 跑步动画 / 眨眼
+  player.runTimer += dt;
+  const frameTime = Math.max(0.07, 0.14 - speed / 4000);
+  if (player.runTimer > frameTime) { player.runTimer = 0; player.runFrame ^= 1; }
+  player.blink = Math.max(0, player.blink - dt);
+  if (Math.random() < dt * 0.5) player.blink = 0.12;
+  player.squash = Math.max(0, player.squash - dt);
+  fireCd = Math.max(0, fireCd - dt);   // 发射冷却衰减
+
+  // 纵向物理
+  player.vy += GRAVITY * dt;
+  player.y += player.vy * dt;
+  const floorY = GROUND_Y - player.h;
+  if (player.y >= floorY) {
+    if (!player.grounded && player.vy > 250) {
+      player.squash = 0.12;   // 落地压扁
+      // 落地小尘
+      for (let i = 0; i < 4; i++) {
+        particles.push({
+          x: player.x + 4 + Math.random() * 14, y: GROUND_Y - 2,
+          vx: (Math.random() - 0.5) * 90, vy: -Math.random() * 40,
+          life: 0.3, color: "#e8d9b8", size: 2
+        });
+      }
+    }
+    player.y = floorY;
+    player.vy = 0;
+    player.grounded = true;
+    player.jumps = 0;
+  }
+
+  // 生成障碍（按世界坐标，间隔随速度变化；障碍越高，前后间距越大，保证落地后能再起跳）
+  while (nextSpawnX < worldX + W + 100) {
+    const o = spawnObstacle(nextSpawnX);
+    const heightBonus = o.h >= 150 ? 0.7 : o.h >= 90 ? 0.55 : o.h >= 60 ? 0.25 : o.type === "glovebox" ? 0.3 : 0;
+    const gapTime = 1.0 + Math.random() * 0.7 + heightBonus;
+    let gap = speed * gapTime + 80;
+    if (fever > 0) gap *= 0.22;   // 奶龙时刻：障碍更密集（生成快于射杀，屏幕持续有障碍）
+    nextSpawnX += gap;
+  }
+
+  // 动态障碍：拳套盒靠近触发、刺虫向左爬行
+  for (const o of obstacles) {
+    if (o.type === "glovebox") {
+      const sx = o.wx - worldX + PLAYER_SCREEN_X;
+      if (sx < GLOVE_TRIGGER || o.t > 0) o.t += dt;   // 进入触发距离后才开始周期
+    } else if (o.type === "spikebug") {
+      o.t += dt;
+      o.wx -= o.vx * bugSpeedMul * dt;
+    }
+  }
+
+  // 进阶模式：子弹拾取物生成 / 拾取 / 弹药飞行与击毁
+  const box = { x: player.x + 2, y: player.y + 3, w: 18, h: 25 };   // 碰撞盒（拾取判定也用它）
+  if (gameMode === "hard") {
+    while (nextPickupX < worldX + W + 100) {
+      // 避开障碍：与任何障碍横向重叠时，把子弹挪到该障碍之后（可连续避让）
+      let px0 = nextPickupX;
+      for (const o of obstacles) {
+        if (px0 + 12 > o.wx - 8 && px0 - 4 < o.wx + o.w + 8) {
+          px0 = o.wx + o.w + 40;
+        }
+      }
+      const lane = [32, 72, 118][Math.floor(Math.random() * 3)];
+      pickups.push({ wx: px0, y: GROUND_Y - lane, t: Math.random() * 6 });
+      nextPickupX += speed * (4.5 + Math.random() * 3);
+    }
+    for (const pk of pickups) {
+      pk.t += dt;
+      const sx = pk.wx - worldX + PLAYER_SCREEN_X;
+      const py2 = pk.y + Math.sin(pk.t * 4) * 3;
+      if (box.x < sx + 14 && box.x + box.w > sx - 6 && box.y < py2 + 13 && box.y + box.h > py2 - 6) {
+        pk.dead = true;
+        ammo = Math.min(3, ammo + 1);
+        sfxPickup();
+        for (let i = 0; i < 6; i++) {
+          particles.push({ x: sx + 4, y: py2 + 4, vx: (Math.random() - 0.5) * 120, vy: -Math.random() * 90, life: 0.35, color: "#ffd23f", size: 2 });
+        }
+      }
+    }
+    pickups = pickups.filter(pk => !pk.dead && pk.wx - worldX + PLAYER_SCREEN_X > -30);
+
+    // 飞鸟：天空中随机刷新（非障碍，不参与玩家碰撞），自右向左飞
+    while (nextBirdX < worldX + W + 100) {
+      birds.push({
+        wx: nextBirdX,
+        y: GROUND_Y - 55 - Math.random() * 85,      // 天空高度带
+        vx: 60 + Math.random() * 50,                // 相对世界向左的速度
+        t: Math.random() * 6, dead: false
+      });
+      nextBirdX += speed * (2.5 + Math.random() * 2.5);
+    }
+    for (const b of birds) { b.t += dt; b.wx -= b.vx * dt; }
+    birds = birds.filter(b => !b.dead && b.wx - worldX + PLAYER_SCREEN_X > -30);
+
+    for (const p of projectiles) p.x += p.vx * dt;
+    for (const p of projectiles) {
+      if (p.dead) continue;
+      // 命中飞鸟：+200 分，羽毛四散
+      for (const b of birds) {
+        if (b.dead) continue;
+        const bsx = b.wx - worldX + PLAYER_SCREEN_X;
+        if (p.x + 8 > bsx - 2 && p.x < bsx + 18 && p.y + 4 > b.y - 6 && p.y < b.y + 8) {
+          p.dead = true;
+          b.dead = true;
+          scoreBonus += 200;
+          sfxBird();
+          for (let i = 0; i < 10; i++) {
+            particles.push({
+              x: bsx + 8, y: b.y,
+              vx: (Math.random() - 0.5) * 200, vy: -Math.random() * 140 - 20,
+              life: 0.5 + Math.random() * 0.3, color: i % 3 ? "#ffffff" : "#ffd23f", size: 2 + Math.random() * 2
+            });
+          }
+          break;
+        }
+      }
+      if (p.dead) continue;
+      for (const o of obstacles) {
+        const sx = o.wx - worldX + PLAYER_SCREEN_X;
+        if (sx < -60 || sx > W + 30) continue;
+        const ob = obstacleBox(o, sx);
+        // 弹药命中盒：比玩家碰撞盒宽大（横向±4、纵向到地面），低矮的刺虫/荆棘也能打中
+        const hb = { x: sx - 4, y: GROUND_Y - o.h - 6, w: o.w + 8, h: o.h + 6 };
+        if (p.x + 8 > hb.x && p.x < hb.x + hb.w && p.y + 4 > hb.y && p.y < hb.y + hb.h) {
+          p.dead = true;
+          o.dead = true;
+          scoreBonus += 100;
+          sfxBoom();
+          const cy = ob.y + ob.h / 2;
+          for (let i = 0; i < 12; i++) {
+            particles.push({
+              x: ob.x + ob.w / 2, y: cy,
+              vx: (Math.random() - 0.5) * 260, vy: -Math.random() * 200 - 30,
+              life: 0.5 + Math.random() * 0.3, color: i % 2 ? "#ffcf5a" : "#ff8a4a", size: 2 + Math.random() * 2
+            });
+          }
+          break;
+        }
+      }
+    }
+    projectiles = projectiles.filter(p => !p.dead && p.x < W + 30);
+  }
+
+  // 碰撞（包围盒与奶龙躯干对齐，比视觉略小，手感宽容；奶龙时刻及结束后 0.5s 宽限、奶龙复活 1s、锤锤冲刺 5s 内无敌，直接穿过障碍）
+  if (fever <= 0 && feverGrace <= 0 && reviveInvuln <= 0 && dashT <= 0) {
+    for (const o of obstacles) {
+      const sx = o.wx - worldX + PLAYER_SCREEN_X;
+      const ob = obstacleBox(o, sx);
+      if (box.x < ob.x + ob.w && box.x + box.w > ob.x &&
+          box.y < ob.y + ob.h && box.y + box.h > ob.y) {
+        gameOver();
+        break;
+      }
+    }
+  }
+
+  // 清理屏外与被击毁的障碍
+  obstacles = obstacles.filter(o => !o.dead && o.wx - worldX + PLAYER_SCREEN_X > -60);
+}
+
+function updateParticles(dt) {
+  for (const p of particles) {
+    p.vy += 700 * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.life -= dt;
+  }
+  particles = particles.filter(p => p.life > 0);
+}
+
+/* ================= 绘制：像素工具 ================= */
+function px(x, y, w, h, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x | 0, y | 0, Math.ceil(w), Math.ceil(h));
+}
+
+/* ================= 绘制：背景 ================= */
+function drawSky() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#6fc3ff");
+  g.addColorStop(1, "#cdeeff");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawCloud(x, y, s) {
+  const q = 3 * s;
+  px(x,        y,        q * 3, q * 2, C.cloud);
+  px(x + q,    y - q,    q * 3, q,     C.cloud);
+  px(x + q * 3,y - q*0.5,q * 2, q,     C.cloud);
+}
+
+function drawHill(x, baseY, h, color) {
+  // 像素阶梯小山
+  let y = baseY - h;
+  let wHalf = 6;
+  let cx = x;
+  while (y < baseY) {
+    px(cx, y, wHalf * 2, baseY - y > 6 ? 6 : baseY - y, color);
+    cx -= 6; wHalf += 6; y += 6;
+  }
+}
+
+function drawBackground(cam) {
+  drawSky();
+
+  // 太阳
+  px(404, 26, 26, 26, "#ffe873");
+  px(408, 22, 18, 4, "#ffe873");
+  px(408, 52, 18, 4, "#ffe873");
+  px(396, 34, 4, 10, "#ffe873");
+  px(434, 34, 4, 10, "#ffe873");
+
+  // 远山两层（视差）
+  const span = 600;
+  hills.forEach((h, i) => {
+    const par = h.layer === 0 ? 0.25 : 0.45;
+    let x = ((h.x - cam * par) % (span * 0.5) + span * 0.5) % (span * 0.5) - 80;
+    drawHill(Math.round(x), GROUND_Y, h.h, h.layer === 0 ? C.hillA : C.hillB);
+  });
+
+  // 云（视差 0.2）
+  clouds.forEach(c => {
+    let x = ((c.x - cam * 0.2) % 560 + 560) % 560 - 60;
+    drawCloud(Math.round(x), c.y | 0, c.s);
+  });
+}
+
+function drawGround(cam) {
+  px(0, GROUND_Y, W, H - GROUND_Y, C.dirt);
+  px(0, GROUND_Y, W, 5, C.grass);
+  px(0, GROUND_Y + 5, W, 2, C.grassD);
+  // 草尖
+  for (let i = -1; i < W / 8 + 1; i++) {
+    const x = Math.round(i * 8 - (cam % 8));
+    px(x, GROUND_Y - 2, 2, 2, C.grass);
+  }
+  // 土块纹理（随镜头滚动）
+  for (let i = -1; i < W / 26 + 1; i++) {
+    const x = Math.round(i * 26 - (cam % 26)) + 6;
+    px(x,         GROUND_Y + 14, 4, 3, C.dirtD);
+    px(x + 12,    GROUND_Y + 26, 5, 3, C.dirtD);
+    px(x - 4,     GROUND_Y + 34, 3, 2, C.dirtD);
+  }
+}
+
+/* ================= 绘制：奶龙（像素矩阵 sprite） =================
+   16×16 网格，每格 2px，实际 32×32。色板见 NAILONG_PAL。
+   # 深棕描边  y 主黄  o 暗橙阴影  b 奶白肚皮  w 眼白
+   g 亮绿虹膜  d 深绿  k 黑瞳  p 棕爪尖  m 嘴线  */
+const NAILONG_PAL = {
+  "#": "#8a4513", "y": "#ffc93c", "o": "#efa01e", "b": "#fff0c6",
+  "w": "#ffffff", "g": "#4aa64f", "d": "#1c6b33", "k": "#161616",
+  "p": "#96501f", "m": "#6e3a12"
+};
+const NAILONG_BODY = [
+  ".......###......",
+  ".....#yyyy#.....",
+  "...#yyyyyyyy#...",
+  "..#yyyyywwwww#..",
+  ".#yyyyyywgwkwy#.",
+  ".#yyyyyywggkwy#.",
+  ".#yyyyyywgkkwy#.",
+  ".#yyyyyywwwwwy#.",
+  ".#yyyyyyyymmyy#.",
+  "..##yyyyyyyyy#..",
+  "#yyyyyybbbbb#yp.",
+  "#yyyooybbbbbbb#..",
+  ".ooyyybbbbbbby#..",
+  ".#yyyyy..yyyy#..",
+  "..#yyyy..yyyy#..",
+  "...yppp..yppp..."
+];
+// 跑步第二帧：只换腿部 2 行（迈腿）
+const NAILONG_RUNB = NAILONG_BODY.slice();
+NAILONG_RUNB[14] = "....yyyyyyyy....";
+NAILONG_RUNB[15] = ".....ypp.yppp...";
+// 空中帧：尾巴上翘、小手抬起、双腿收起
+const NAILONG_JUMP = NAILONG_BODY.slice();
+NAILONG_JUMP[8]  = "y#yyyyyyyymmyy#.";
+NAILONG_JUMP[9]  = ".yyy#yyyyyyyyyp.";
+NAILONG_JUMP[10] = "#yyyyyybbbbb#...";
+NAILONG_JUMP[13] = "..#yyyyyyyy#....";
+NAILONG_JUMP[14] = ".....yyyyyy.....";
+NAILONG_JUMP[15] = "................";
+const SPR = { runA: NAILONG_BODY, runB: NAILONG_RUNB, jump: NAILONG_JUMP };
+
+/* ================= 形象（皮肤）系统 =================
+   奶龙 = 初始形象；雪王 = 进阶模式最高分达 6000 解锁 */
+const SNOWKING_PAL = {
+  "#": "#1a1a1a", "w": "#ffffff", "v": "#c9d8ea", "b": "#2f6fd6",
+  "o": "#f08c1e", "r": "#e33b2e", "g": "#f6c445", "c": "#fdf3e0", "t": "#d99a56"
+};
+// 雪王：金冠 + 圆润白圆身(对称椭圆弧) + 蓝眼 + 橙红笑嘴 + 红披风 + 左手冰淇淋权杖
+// ★ 对称椭圆渐变：上半7列→8列→10列，中间10列，下半8列→7列
+// ★★ 每行必须恰好16字符，否则绘制错位！
+const SNOWKING_BODY = [
+  ".cc..g..g..g....",    // r0 皇冠齿
+  "cccc.ggggggg....",    // r1 皇冠底
+  ".tt..#wwwwwww#..",    // r2 头顶圆弧(白7列)：左#c5, 右#c13
+  "..t.#wwwwwwww#..",    // r3 头顶渐宽(白8列)：左#c4, 右#c13
+  "..g#wwwwwwwwww#.",    // r4 最宽开始(白10列)：左#c3, 右#c14
+  "..g#wwwwwwwwww#.",    // r5 最宽保持
+  "..g#wwbbwwbbww#.",    // r6 眼睛
+  "..g#wwbbwwbbww#.",    // r7 眼睛
+  "..g#wwwwooooww#.",    // r8 嘴顶
+  "..g#wwworrrrow#.",    // r9 嘴底(白10列：www+o+rrrr+o+w)
+  "..g#wwwwooooww#.",    // r10 嘴底
+  "..g#wwwwwwwwww#.",    // r11 全白
+  "..g.#wwwwwwww#..",    // r12 开始收窄(白8列)：左#c4, 右#c13
+  ".rr..#wwwwwww#..",    // r13 继续收(白7列)：披风rr(c1-2), 左#c5, 右#c13
+  "rr...#wwwwwww#..",    // r14 最窄(白7列)：披风rr(c0-1), 左#c5, 右#c13
+  "rr.gcc.......vv."     // r15 脚底+权杖：金柄g(c2), 冰淇淋cc(c3-4), 脚vv(c12-13)
+];
+// 跑步第二帧：前脚错开半步
+const SNOWKING_RUNB = SNOWKING_BODY.slice();
+SNOWKING_RUNB[15] = "rr.gcc......vvv.";   // 脚错开
+// 空中帧：收脚 + 权杖上收
+const SNOWKING_JUMP = SNOWKING_BODY.slice();
+SNOWKING_JUMP[15] = "rr.gcc..........";
+const SNOWKING_SPR = { runA: SNOWKING_BODY, runB: SNOWKING_RUNB, jump: SNOWKING_JUMP };
+
+/* ---- 吃豆人：亮黄圆身 + 右侧楔形大嘴 + 黑眼白瞳（无描边，扁平复古风） ----
+   跑步两帧 = 张嘴/闭口交替，自带经典啃食动画 ★ 每行必须恰好16字符 */
+const PACMAN_PAL = { "y": "#ffd200", "k": "#141414", "w": "#ffffff", "d": "#c9a227" };
+const PACMAN_BODY = [
+  ".....yyyyyy.....",    // r0
+  "...yyyyyyyyyy...",    // r1
+  "..yyyyyyyyyyyy..",    // r2
+  ".yyyyykkyyyy....",    // r3 眼(黑)     嘴张：唇起
+  ".yyyyykwyyy.....",    // r4 眼(白瞳)   楔形切口
+  ".yyyyyyyyy......",    // r5
+  ".yyyyyyyy.......",    // r6
+  ".yyyyyyy........",    // r7 嘴尖(圆心)
+  ".yyyyyyy........",    // r8 嘴尖(圆心)
+  ".yyyyyyyy.......",    // r9
+  ".yyyyyyyyy......",    // r10
+  ".yyyyyyyyyy.....",    // r11
+  ".yyyyyyyyyyy....",    // r12 唇落
+  "..yyyyyyyyyyyy..",    // r13
+  "...yyyyyyyyyy...",    // r14
+  ".....yyyyyy....."     // r15
+];
+// 跑步第二帧：嘴闭合（完整圆）
+const PACMAN_RUNB = [
+  ".....yyyyyy.....",
+  "...yyyyyyyyyy...",
+  "..yyyyyyyyyyyy..",
+  ".yyyyykkyyyyyyy.",    // 眼(黑)
+  ".yyyyykwyyyyyyy.",    // 眼(白瞳)
+  ".yyyyyyyyyyyyyy.",
+  ".yyyyyyyyyyyyyy.",
+  ".yyyyyyyyyyyyyy.",
+  ".yyyyyyyyyyyyyy.",
+  ".yyyyyyyyyyyyyy.",
+  ".yyyyyyyyyyyyyy.",
+  ".yyyyyyyyyyyyyy.",
+  ".yyyyyyyyyyyyyy.",
+  "..yyyyyyyyyyyy..",
+  "...yyyyyyyyyy...",
+  ".....yyyyyy....."
+];
+// 空中帧：与张嘴帧一致
+const PACMAN_JUMP = PACMAN_BODY.slice();
+const PACMAN_SPR = { runA: PACMAN_BODY, runB: PACMAN_RUNB, jump: PACMAN_JUMP };
+
+/* ---- 锤锤（小狮子）：红色火焰鬃毛 + 黄色圆脸 + 张嘴笑 + 左侧尾巴（荧光带不画） ----
+   ★ 每行必须恰好16字符 */
+const LION_PAL = { "m": "#e05a1a", "y": "#ffc23e", "b": "#ffe1ad", "e": "#33241a", "n": "#7a3b12", "r": "#d43a2a" };
+const LION_BODY = [
+  "....m.mm.mm.....",    // r0 鬃毛顶刺
+  "..mmmmmmmmmmmm..",    // r1
+  ".mmmmmmmmmmmmmm.",    // r2 鬃毛最宽
+  "mmm.yyyyyyyy.mmm",    // r3 脸部开始
+  "mmm.yyyyyyyy.mmm",    // r4
+  "mmm.yyeyyeyy.mmm",    // r5 眼
+  "mmm.yyeyyeyy.mmm",    // r6 眼
+  "mmm.yyynnyyy.mmm",    // r7 鼻
+  "mmm.yyrrrrry.mmm",    // r8 张嘴笑
+  "mmm.yyrrrrry.mmm",    // r9
+  "mmm.yyyrrryy.mmm",    // r10 嘴收
+  ".mmyyyyyyyyyymm.",    // r11 下巴
+  ".mmmyyyyyyyymmm.",    // r12 身体
+  "m...yyyyyyyy.mm.",    // r13 尾尖(左)
+  "mm..yyyyyyyy....",    // r14 尾巴
+  "....bb....bb...."     // r15 脚掌
+];
+// 跑步第二帧：脚掌错开
+const LION_RUNB = LION_BODY.slice();
+LION_RUNB[15] = "....bb.....bb...";
+// 空中帧：收脚收尾
+const LION_JUMP = LION_BODY.slice();
+LION_JUMP[14] = "mm...yyyyyy.....";
+LION_JUMP[15] = "................";
+const LION_SPR = { runA: LION_BODY, runB: LION_RUNB, jump: LION_JUMP };
+
+const SKINS = {
+  nailong: {
+    name: "奶龙", need: 0, spr: SPR, pal: NAILONG_PAL,
+    skillDesc: ["首次死亡后立即复活", "并获得 1 秒无敌时间"],
+    pc: ["#ffc93c", "#efa01e"],                                   // 死亡碎片颜色
+    blink: { fill: "#ffc93c", line: "#6e3a12", r: [0, -24, 10, 6], l: [1, -22, 8, 1] },
+    dead: { col: "#6e3a12",
+            x: [[0,-26],[2,-24],[4,-22],[6,-20],[8,-18],[8,-26],[6,-24],[4,-22],[2,-20],[0,-18]],
+            mouth: { r: [2, -17, 10, 5], inner: [4, -15, 6, 3] } }
+  },
+  snowking: {
+    name: "雪王", need: 6000, spr: SNOWKING_SPR, pal: SNOWKING_PAL,
+    skillDesc: ["发射子弹后的 1.2 秒内", "可免费再发射一次"],
+    pc: ["#ffffff", "#c9d8ea"],
+    blink: { fill: "#ffffff", line: "#5a6b80", r: [12, -20, 10, 4], l: [13, -18, 8, 1] },
+    dead: { col: "#1a1a1a",
+            x: [[12,-20],[14,-18],[14,-20],[12,-18],[20,-20],[22,-18],[22,-20],[20,-18]],
+            mouth: null }                                          // 雪王本来就是张嘴笑
+  },
+  pacman: {
+    name: "吃豆人", need: 12000, spr: PACMAN_SPR, pal: PACMAN_PAL,
+    skillDesc: ["奶龙时刻持续时间", "增加 2 秒"],
+    pc: ["#ffd200", "#c9a227"],
+    blink: { fill: "#ffd200", line: "#c9a227", r: [-4, -26, 4, 4], l: [-4, -23, 4, 1] },
+    dead: { col: "#141414",
+            x: [[-4,-26],[-2,-24],[0,-22],[0,-26],[-4,-22]],
+            mouth: null }                                          // 吃豆人大嘴是本体特征
+  },
+  lion: {
+    name: "锤锤", need: 18000, spr: LION_SPR, pal: LION_PAL,
+    skillDesc: ["开局立即以极速冲刺 5 秒", "冲刺期间无敌"],
+    pc: ["#e05a1a", "#ffc23e"],
+    blink: { fill: "#ffc23e", line: "#33241a", r: [-4, -22, 7, 4], l: [-3, -20, 5, 1] },
+    dead: { col: "#33241a",
+            x: [[-4,-22],[-2,-20],[-2,-22],[-4,-20],[2,-22],[4,-20],[4,-22],[2,-20]],
+            mouth: null }                                          // 锤锤本来就是张嘴笑
+  }
+};
+let skin = localStorage.getItem("nailong_skin") || "nailong";
+if (!SKINS[skin]) skin = "nailong";
+// 形象面板卡片点击区（四卡横排）
+const SKIN_CARD = {
+  nailong:  { x: 45,  y: 54, w: 90, h: 118 },
+  snowking: { x: 145, y: 54, w: 90, h: 118 },
+  pacman:   { x: 245, y: 54, w: 90, h: 118 },
+  lion:     { x: 345, y: 54, w: 90, h: 118 }
+};
+
+/* ---- 形象技能运行时状态（resetGame 重置） ---- */
+let reviveUsed = false;     // 奶龙技能：本局复活是否已用
+let reviveInvuln = 0;       // 奶龙技能：复活后的无敌剩余时间
+let freeShotT = 0;          // 雪王技能：免费再射窗口剩余时间
+let freeShotUsed = false;   // 雪王技能：当前窗口的免费射击是否已用
+let feverDur = FEVER_TIME;  // 本次奶龙时刻总时长（吃豆人技能 +2s）
+let dashT = 0;              // 锤锤技能：开局无敌冲刺剩余时间（480 高速）
+
+function drawSprite(map, ox, oy, scale = 2, pal = NAILONG_PAL) {
+  for (let r = 0; r < map.length; r++) {
+    const row = map[r];
+    for (let c = 0; c < row.length; c++) {
+      const col = pal[row[c]];
+      if (col) { ctx.fillStyle = col; ctx.fillRect(ox + c * scale, oy + r * scale, scale, scale); }
+    }
+  }
+}
+
+/* 以脚底中心 (player.x+10, player.y+28) 为锚点绘制，方便做挤压拉伸与倒地旋转 */
+function drawNailong() {
+  const SK = SKINS[skin];                        // 当前形象
+  const airborne = state === STATE.PLAY && !player.grounded && !player.dead;
+  let map = player.runFrame ? SK.spr.runB : SK.spr.runA;
+  let sx = 1, sy = 1, bob = 0, angle = 0;
+  const now = performance.now();
+
+  if (state === STATE.MENU) {
+    // 待机：轻微呼吸 + 原地踏步 + 摆尾（跑帧切换）
+    bob = Math.round(Math.sin(now / 280) * 1);
+    const br = Math.sin(now / 620);
+    sy = 1 + br * 0.025; sx = 1 - br * 0.02;
+  } else if (player.dead) {
+    // 撞晕：X 眼、张嘴、向前栽倒
+    map = SK.spr.runA;
+    const t = Math.min(1, overTimer / 0.28);
+    angle = (1 - Math.pow(1 - t, 2)) * Math.PI * 0.46;
+  } else if (airborne) {
+    map = SK.spr.jump;
+    if (player.vy < -350) { sy = 1.09; sx = 0.93; }       // 起跳拉伸
+    else if (player.vy > 220) { sy = 0.95; sx = 1.05; }    // 下落压一点
+  } else if (player.squash > 0) {
+    const k = player.squash / 0.12;                        // 落地压扁回弹
+    sy = 1 - 0.2 * k; sx = 1 + 0.16 * k;
+  } else if (state === STATE.PLAY) {
+    bob = player.runFrame ? -1 : 0;                        // 跑步起伏
+  }
+
+  const ax = Math.round(player.x + 10);
+  const ay = Math.round(player.y + 28 + bob);
+
+  // 奶龙时刻：金色呼吸大光环 + 旋转光芒
+  if (fever > 0) {
+    ctx.fillStyle = "rgba(255,210,63,.32)";
+    ctx.beginPath(); ctx.arc(ax, ay - 14, 27 + Math.sin(now / 80) * 4, 0, 7); ctx.fill();
+    ctx.strokeStyle = "rgba(255,220,90,.8)";
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 6; i++) {
+      const a = now / 240 + i * Math.PI / 3;
+      const r0 = 31, r1 = 40 + Math.sin(now / 70 + i) * 5;
+      ctx.beginPath();
+      ctx.moveTo(ax + Math.cos(a) * r0, ay - 14 + Math.sin(a) * r0);
+      ctx.lineTo(ax + Math.cos(a) * r1, ay - 14 + Math.sin(a) * r1);
+      ctx.stroke();
+    }
+  }
+
+  ctx.save();
+  ctx.translate(ax, ay);
+  if (angle) ctx.rotate(angle);
+  ctx.scale(sx, sy);
+  drawSprite(map, -16, -32, 2, SK.pal);
+
+  // 眨眼：色块盖住眼睛，留一条闭眼线（坐标随形象不同）
+  if (!player.dead && player.blink > 0) {
+    ctx.fillStyle = SK.blink.fill; ctx.fillRect(...SK.blink.r);
+    ctx.fillStyle = SK.blink.line; ctx.fillRect(...SK.blink.l);
+  }
+  // 撞晕表情：X 眼（+ 张嘴，雪王天生张嘴笑则免）
+  if (player.dead) {
+    ctx.fillStyle = SK.dead.col;
+    SK.dead.x.forEach(q => ctx.fillRect(q[0], q[1], 2, 2));
+    if (SK.dead.mouth) {
+      ctx.fillRect(...SK.dead.mouth.r);
+      ctx.fillStyle = "#d96b4a"; ctx.fillRect(...SK.dead.mouth.inner);
+    }
+  }
+  ctx.restore();
+}
+
+/* ================= 绘制：障碍物 =================
+   仙人掌三档形态：矮胖幼株 / 高杆（一节环）/ 巨柱（双头花苞、两节环） */
+function drawCactus(sx, h) {
+  const y0 = GROUND_Y - h;
+  const tall = h >= 60, giant = h >= 90;
+
+  // 脚下投影
+  ctx.fillStyle = "rgba(0,0,0,.14)";
+  ctx.fillRect(sx, GROUND_Y - 1, 15, 2);
+
+  // 主干（宽 11：sx+2..sx+12）
+  px(sx + 2, y0 + 3, 11, h - 3, C.cactus);
+  px(sx + 2, y0 + 3, 2, h - 3, "#5ec46b");   // 左棱高光
+  px(sx + 11, y0 + 3, 2, h - 3, C.cactusD); // 右棱阴影
+  // 圆顶
+  px(sx + 3, y0 + 1, 9, 2, C.cactus);
+  px(sx + 5, y0, 5, 1, C.cactus);
+  px(sx + 3, y0 + 1, 2, 2, "#5ec46b");
+  px(sx + 10, y0 + 1, 2, 2, C.cactusD);
+
+  // 棱纹中线
+  for (let yy = y0 + 8; yy < GROUND_Y - 5; yy += 9) {
+    px(sx + 7, yy, 1, 3, C.cactusD);
+  }
+  // 侧边刺簇
+  for (let i = 6; i < h - 5; i += 9) {
+    px(sx + 2, y0 + i, 1, 2, "#a7e89a");
+    px(sx + 12, y0 + i + 4, 1, 2, C.cactusD);
+  }
+  // 节环（高档更多）
+  const bands = giant ? 2 : tall ? 1 : 0;
+  for (let b = 1; b <= bands; b++) {
+    const by = y0 + Math.round((h * b) / (bands + 1));
+    px(sx + 2, by, 11, 1, C.cactusD);
+    px(sx + 2, by - 1, 11, 1, "#2e8a41");
+  }
+  // 巨柱顶端双头花苞
+  if (giant) {
+    px(sx + 2, y0 - 2, 4, 3, C.cactus);
+    px(sx + 3, y0 - 3, 2, 1, C.cactus);
+    px(sx + 9, y0 - 2, 4, 3, C.cactus);
+    px(sx + 10, y0 - 3, 2, 1, C.cactus);
+    px(sx + 3, y0 - 4, 2, 1, "#ff7d9c");   // 花苞粉红点
+    px(sx + 10, y0 - 4, 2, 1, "#ff7d9c");
+  }
+}
+function drawRock(sx, w, h) {
+  const y = GROUND_Y - h;
+  ctx.fillStyle = "rgba(0,0,0,.14)";
+  ctx.fillRect(sx + 1, GROUND_Y - 1, w - 2, 2);
+  px(sx + 3, y, w - 6, 3, C.rock);
+  px(sx + 1, y + 3, w - 2, h - 5, C.rock);
+  px(sx + 3, y + h - 2, w - 6, 2, C.rockD);
+  px(sx + 2, y + 4, 3, h - 8, "#c3c8ce");          // 高光
+  px(sx + w - 5, y + 4, 2, h - 8, C.rockD);        // 暗部
+  px(sx + 4, y + 1, 2, 1, "#dfe3e8");              // 顶部亮斑
+}
+/* 荆棘：低矮但横向很宽的枯刺丛 */
+function drawThorn(sx, w, h) {
+  const y = GROUND_Y - h;
+  ctx.fillStyle = "rgba(0,0,0,.14)";
+  ctx.fillRect(sx, GROUND_Y - 1, w, 2);
+  // 枯藤基座 + 缠绕枝蔓
+  px(sx, y + h - 4, w, 4, "#5b3a1e");
+  px(sx, y + h - 2, w, 2, "#462a12");
+  for (let x = 2; x < w - 4; x += 8) {
+    px(sx + x, y + h - 6, 5, 2, "#6e4726");
+  }
+  // 尖刺（高低交错的三角刺，尖端泛白）
+  let i = 0;
+  for (let x = 2; x + 3 <= w - 1; x += 6, i++) {
+    const tall = i % 2 === 0 ? h - 3 : h - 6;
+    const cx0 = sx + x + 1;
+    for (let k = 0; k < tall; k++) {
+      const ww = k === 0 ? 1 : k < 3 ? 2 : 3;
+      px(cx0 - ((ww - 1) >> 1), y + h - 4 - tall + k, ww, 1, k < 2 ? "#e8e2f0" : "#8a6a4a");
+    }
+  }
+}
+/* 拳套盒：木箱中周期性弹出的拳套，弹出物与箱体均致命 */
+function drawGlovebox(sx, o) {
+  const bw = o.w, bh = o.h;          // 18 × 14
+  const by = GROUND_Y - bh;
+  const e = gloveExt(o);
+  const cx0 = sx + (bw >> 1);
+  ctx.fillStyle = "rgba(0,0,0,.16)";
+  ctx.fillRect(sx, GROUND_Y - 1, bw, 2);
+  // 弹出的拳套（先画，箱体后画，形成从箱口钻出的层次）
+  if (e > 0.02) {
+    const ext = Math.round(e * 44);
+    const gy = by - ext - 10;              // 拳套顶
+    // 伸缩杆
+    px(cx0 - 2, gy + 10, 4, ext, "#e8d9b8");
+    px(cx0 - 2, gy + 10, 1, ext, "#fff3d0");
+    for (let yy = gy + 13; yy < by - 1; yy += 6) px(cx0 - 2, yy, 4, 1, "#c9b48a");
+    // 拳套
+    px(cx0 - 5, gy + 2, 10, 7, "#e84545");
+    px(cx0 - 4, gy, 8, 2, "#e84545");
+    px(cx0 - 5, gy + 8, 7, 2, "#e84545");
+    px(cx0 + 3, gy + 5, 3, 3, "#d63a3a");   // 拇指
+    px(cx0 - 4, gy + 1, 3, 2, "#ff8a7a");   // 高光
+    px(cx0 - 5, gy + 9, 7, 1, "#a82a2a");   // 腕口
+  }
+  // 箱体（木箱 + 顶部开口 + 铁护角 + 警示号）
+  px(sx, by, bw, bh, "#7a4a20");
+  px(sx + 1, by + 1, bw - 2, bh - 2, "#c98f4e");
+  px(sx + 2, by + 5, bw - 4, 1, "#a36d33");
+  px(sx + 2, by + 10, bw - 4, 1, "#a36d33");
+  px(sx + 2, by + 15, bw - 4, 1, "#a36d33");
+  px(sx + 4, by, bw - 8, 2, "#2a1a0c");
+  px(sx, by, 3, 3, "#9aa0a8");
+  px(sx + bw - 3, by, 3, 3, "#9aa0a8");
+  px(sx, by + bh - 3, 3, 3, "#6f7680");
+  px(sx + bw - 3, by + bh - 3, 3, 3, "#6f7680");
+  px(cx0 - 1, by + 6, 2, 5, "#ffd23f");
+  px(cx0 - 1, by + 13, 2, 2, "#ffd23f");
+}
+/* 刺虫：从右向左爬行的多节刺虫 */
+function drawSpikebug(sx, o) {
+  const y = GROUND_Y - o.h;
+  const t = o.t;
+  ctx.fillStyle = "rgba(0,0,0,.14)";
+  ctx.fillRect(sx + 1, GROUND_Y - 1, o.w - 2, 2);
+  // 小腿（两帧交替划动）
+  const step = Math.floor(t * 12) % 2;
+  for (let i = 0; i < 4; i++) {
+    const lx = sx + 3 + i * 5 + ((i + step) % 2);
+    px(lx, GROUND_Y - 3, 2, 3, "#3a2450");
+  }
+  // 身体（深紫多节）
+  px(sx + 2, y + 4, o.w - 3, 6, "#6a4a9a");
+  px(sx + 4, y + 2, o.w - 7, 3, "#6a4a9a");
+  px(sx + 4, y + 8, o.w - 7, 2, "#553a7e");
+  px(sx + 9, y + 3, 1, 6, "#553a7e");    // 节纹
+  px(sx + 15, y + 3, 1, 6, "#553a7e");
+  // 背刺（白色三角刺）
+  const spikes = [[6, 3], [12, 4], [18, 3]];
+  for (const [ox, sh] of spikes) {
+    for (let k = 0; k < sh; k++) {
+      const ww = k === 0 ? 1 : (k < sh - 1 ? 2 : 3);
+      px(sx + ox - ((ww - 1) >> 1), y + 2 - sh + k, ww, 1, k === 0 ? "#f2ecff" : "#cfc2e8");
+    }
+  }
+  // 头（朝左）：怒目红瞳 + 触角 + 小颚
+  px(sx, y + 4, 4, 5, "#553a7e");
+  px(sx + 1, y + 5, 2, 2, "#ffffff");
+  px(sx + 1, y + 6, 1, 1, "#d63a3a");
+  px(sx - 1, y + 7, 2, 1, "#3a2450");
+  const wag = Math.floor(t * 6) % 2;
+  px(sx + 1, y + 2 + wag, 1, 2, "#3a2450");
+  px(sx + 3, y + 3 - wag, 1, 2, "#3a2450");
+}
+
+/* ================= 绘制：粒子/HUD ================= */
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.globalAlpha = Math.max(0, Math.min(1, p.life * 2));
+    px(p.x, p.y, p.size, p.size, p.color);
+  });
+  ctx.globalAlpha = 1;
+}
+
+function pixelText(str, x, y, size, color, align = "left", shadow = true) {
+  ctx.font = `bold ${size}px "Courier New", monospace`;
+  ctx.textAlign = align;
+  ctx.textBaseline = "top";
+  if (shadow) {
+    ctx.fillStyle = "rgba(0,0,0,.35)";
+    ctx.fillText(str, x + 2, y + 2);
+  }
+  ctx.fillStyle = color;
+  ctx.fillText(str, x, y);
+  ctx.textAlign = "left";
+}
+
+/* ================= 按钮 ================= */
+const IS_TOUCH = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+let wrapRotated = false;   // 竖屏下 #wrap 旋转 90° 模拟横屏
+
+/* 触屏设备布局：用 innerWidth/innerHeight 精确计算（内置浏览器 CSS 视口单位不可靠） */
+function layoutWrap(w, h, touch) {
+  const wrap = document.getElementById("wrap");
+  if (!touch) { wrap.style.width = ""; wrap.style.transform = ""; wrapRotated = false; return; }
+  wrapRotated = h > w;                                        // 竖屏 → 旋转 90°
+  const cw = wrapRotated ? Math.min(w * 16 / 9, h) : Math.min(w, h * 16 / 9);
+  wrap.style.width = Math.round(cw) + "px";
+  wrap.style.transform = wrapRotated ? "rotate(90deg)" : "none";
+}
+function fitWrap() { layoutWrap(innerWidth, innerHeight, IS_TOUCH); }
+addEventListener("resize", fitWrap);
+addEventListener("orientationchange", fitWrap);
+fitWrap();
+// 触屏设备：全部按钮放大，方便手指点按
+const buttons = IS_TOUCH ? {
+  hub:    { x: 10,  y: 10,  w: 76,  h: 26, label: "← 游戏大厅" },
+  retry:  { x: 78,  y: 184, w: 150, h: 44, label: "再来一次" },
+  home:   { x: 252, y: 184, w: 150, h: 44, label: "返回首页" },
+  normal: { x: 78,  y: 126, w: 150, h: 46, label: "普通模式" },
+  hard:   { x: 252, y: 126, w: 150, h: 46, label: "进阶模式" },
+  skins:  { x: 80,  y: 180, w: 150, h: 40, label: "分数奖励" },
+  info:   { x: 250, y: 180, w: 150, h: 40, label: "详情" }
+} : {
+  hub:    { x: 10,  y: 10,  w: 76,  h: 22, label: "← 游戏大厅" },
+  retry:  { x: 96,  y: 194, w: 132, h: 34, label: "再来一次" },
+  home:   { x: 252, y: 194, w: 132, h: 34, label: "返回首页" },
+  normal: { x: 108, y: 132, w: 120, h: 36, label: "普通模式" },
+  hard:   { x: 252, y: 132, w: 120, h: 36, label: "进阶模式" },
+  skins:  { x: 110, y: 178, w: 120, h: 30, label: "分数奖励" },
+  info:   { x: 250, y: 178, w: 120, h: 30, label: "详情" }
+};
+let hoverBtn = null;
+let showInfo = false;    // 详情面板是否展开
+let showSkins = false;   // 分数奖励（形象）面板是否展开
+let showSkill = null;    // 正在查看技能说明的形象 id（null=未打开）
+// 形象卡片底部「技能」小按钮的点击区（随卡片布局）
+function skillBtnRect(id) { const b = SKIN_CARD[id]; return { x: b.x + (b.w - 52) / 2, y: b.y + 102, w: 52, h: 13 }; }
+
+function drawButton(b, hover) {
+  const c = hover ? "#ffe278" : C.btn;
+  const big = b.h >= 40;                     // 触屏大按钮：字号同步放大
+  // 阴影底
+  px(b.x, b.y + 3, b.w, b.h, "#7a5410");
+  px(b.x, b.y, b.w, b.h, c);
+  px(b.x, b.y, b.w, 3, "#fff0b0");
+  px(b.x, b.y + b.h - 3, b.w, 3, C.btnD);
+  pixelText(b.label, b.x + b.w / 2, b.y + (big ? 12 : 8), big ? 19 : 16, C.btnText, "center", false);
+}
+
+/* 子弹拾取物：黄铜弹壳 + 铜头，上下浮动闪烁 */
+function drawPickup(sx, y, t) {
+  if (Math.floor(t * 6) % 2 === 0) { ctx.fillStyle = "rgba(255,240,160,.25)"; ctx.fillRect(sx - 2, y - 2, 12, 12); }
+  px(sx, y + 3, 8, 5, "#c9a227");      // 弹壳
+  px(sx, y + 7, 8, 1, "#8a6a12");      // 底缘
+  px(sx + 1, y + 3, 1, 4, "#f0d060");  // 壳身高光
+  px(sx + 2, y, 4, 3, "#d96b4a");      // 铜弹头
+  px(sx + 3, y - 1, 2, 1, "#e88a6a");  // 弹头尖
+}
+/* 飞行弹药：黄白小弹丸 + 尾迹 */
+function drawProjectile(p) {
+  px(p.x - 5, p.y + 1, 5, 2, "rgba(255,220,120,.5)");
+  px(p.x, p.y, 8, 4, "#ffd23f");
+  px(p.x + 5, p.y, 3, 4, "#fff3c0");
+  px(p.x, p.y, 2, 4, "#c98f1e");
+}
+
+/* 飞鸟：白色小鸟，翅膀上下扇动（两帧），自右向左飞 */
+function drawBird(sx, y, t) {
+  const flap = Math.floor(t * 8) % 2 === 0;   // true=翅膀上扬
+  // 身体
+  px(sx + 3, y, 10, 5, "#ffffff");
+  px(sx + 3, y + 4, 8, 2, "#dfe8f0");          // 腹部阴影
+  // 头 + 喙 + 眼
+  px(sx + 11, y - 2, 4, 4, "#ffffff");
+  px(sx + 15, y - 1, 3, 2, "#f0a030");         // 喙
+  px(sx + 13, y - 1, 1, 1, "#161616");         // 眼
+  // 尾羽
+  px(sx, y + 1, 3, 2, "#cfd8e4");
+  // 翅膀（两帧扇动）
+  if (flap) {
+    px(sx + 5, y - 5, 4, 5, "#ffffff");
+    px(sx + 6, y - 7, 3, 2, "#dfe8f0");
+  } else {
+    px(sx + 5, y + 3, 4, 5, "#cfd8e4");
+    px(sx + 6, y + 7, 3, 2, "#b8c4d4");
+  }
+}
+
+function render() {
+  const cam = state === STATE.MENU ? menuScroll : worldX - PLAYER_SCREEN_X;
+  drawBackground(cam);
+  drawGround(cam);
+
+  // 障碍
+  if (state !== STATE.MENU) {
+    for (const o of obstacles) {
+      const sx = o.wx - worldX + PLAYER_SCREEN_X;
+      if (sx > -60 && sx < W + 30) {
+        if (o.type === "cactus") drawCactus(sx, o.h);
+        else if (o.type === "rock") drawRock(sx, o.w, o.h);
+        else if (o.type === "thorn") drawThorn(sx, o.w, o.h);
+        else if (o.type === "glovebox") drawGlovebox(sx, o);
+        else if (o.type === "spikebug") drawSpikebug(sx, o);
+      }
+    }
+    // 进阶模式：子弹拾取物 + 飞行弹药
+    for (const pk of pickups) {
+      const sx = pk.wx - worldX + PLAYER_SCREEN_X;
+      if (sx > -20 && sx < W + 20) drawPickup(sx, pk.y + Math.sin(pk.t * 4) * 3, pk.t);
+    }
+    for (const p of projectiles) drawProjectile(p);
+    // 飞鸟（天空中，非障碍）
+    for (const b of birds) {
+      const bsx = b.wx - worldX + PLAYER_SCREEN_X;
+      if (bsx > -30 && bsx < W + 30) drawBird(bsx, b.y + Math.sin(b.t * 3) * 2, b.t);
+    }
+  }
+
+  // 菜单场景放一个装饰仙人掌在远处滚动
+  if (state === STATE.MENU) {
+    const sx = 360 - (menuScroll % 700);
+    drawCactus(sx < -40 ? sx + 700 : sx, 24);
+  }
+
+  // 奶龙时刻 / 锤锤冲刺：全屏金色速度线（横向疾驰条）
+  if (state === STATE.PLAY && (fever > 0 || dashT > 0)) {
+    for (let i = 0; i < 6; i++) {
+      const ly = Math.floor(Math.random() * (GROUND_Y - 20)) + 10;
+      const lx = Math.floor(Math.random() * W);
+      const len = 34 + Math.random() * 46;
+      px(lx, ly, len, 2, i % 2 ? "rgba(255,236,150,.5)" : "rgba(255,255,255,.42)");
+    }
+  }
+
+  // 奶龙（结束后 0.5s 宽限 / 奶龙复活 1s 无敌：半透明闪烁提示无敌状态）
+  if ((feverGrace > 0 || reviveInvuln > 0) && Math.floor(performance.now() / 80) % 2 === 0) {
+    ctx.globalAlpha = 0.45;
+    drawNailong();
+    ctx.globalAlpha = 1;
+  } else {
+    drawNailong();
+  }
+
+  drawParticles();
+
+  // 奶龙时刻触发瞬间：中央大字弹屏（1.2 秒，弹性放大；吃豆人 +2s 按实际时长计）
+  if (state === STATE.PLAY && fever > feverDur - 1.2) {
+    const k = (feverDur - fever) / 1.2;                // 0 → 1
+    const size = Math.round(34 + 10 * (1 - k) * (1 - k));  // 44 → 34 弹入
+    const col = k > 0.5 ? "#ffd23f" : "#fff3c0";
+    for (const [ox, oy] of [[-3,0],[3,0],[0,-3],[0,3],[-2,-2],[2,2]]) {
+      pixelText("奶龙时刻！！", W / 2 + ox, 118 + oy, size, "#7a4a00", "center");
+    }
+    pixelText("奶龙时刻！！", W / 2, 118, size, col, "center");
+    pixelText("无敌 · 无限弹药 · 超高速", W / 2, 118 + size + 12, 12, "#ffe873", "center");
+  }
+
+  /* ---------- HUD ---------- */
+  if (state === STATE.PLAY || state === STATE.OVER) {
+    pixelText("分数 " + score, 12, 10, 14, "#fff");
+    pixelText("最高 " + best, W - 12, 10, 14, "#ffe873", "right");
+    // 跳跃次数指示
+    for (let i = 0; i < 3; i++) {
+      px(12 + i * 12, 30, 8, 8, i < 3 - player.jumps ? "#ffe873" : "rgba(0,0,0,.25)");
+    }
+    // 进阶模式：弹药储存指示（最多 3 枚）+ 发射提示 / 奶龙时刻倒计时
+    if (gameMode === "hard") {
+      if (fever > 0) {
+        // 奶龙时刻倒计时（顶部居中大号字 + 深色描边，闪烁提示）
+        const shine = Math.sin(performance.now() / 80) > 0;
+        const main = shine ? "#ffd23f" : "#fff3c0";
+        const sec = shine ? "#ff9aa9" : "#ff8a8a";
+        for (const [ox, oy] of [[-2,0],[2,0],[0,-2],[0,2]]) {
+          pixelText("奶龙时刻！", W / 2 + ox, 34 + oy, 22, "#7a4a00", "center");
+          pixelText(Math.ceil(fever) + "s", W / 2 + ox, 58 + oy, 16, "#6b1010", "center");
+        }
+        pixelText("奶龙时刻！", W / 2, 34, 22, main, "center");
+        pixelText(Math.ceil(fever) + "s", W / 2, 58, 16, sec, "center");
+      } else {
+        for (let i = 0; i < 3; i++) {
+          const ax = 12 + i * 12, ay = 44;
+          if (i < ammo) {
+            px(ax + 1, ay, 6, 8, "#c9a227"); px(ax + 2, ay - 2, 4, 2, "#d96b4a"); px(ax + 2, ay, 1, 7, "#f0d060");
+          } else {
+            px(ax + 1, ay, 6, 8, "rgba(0,0,0,.25)");
+          }
+        }
+        if (!IS_TOUCH) pixelText("J 发射", 52, 44, 10, "#ffe873", "left");
+      }
+    }
+  }
+
+  /* ---------- 发射按钮（进阶模式，点击/触摸发射） ---------- */
+  if (state === STATE.PLAY && gameMode === "hard") {
+    const bx = FIRE_RECT.x + FIRE_RECT.w / 2, by = FIRE_RECT.y + FIRE_RECT.h / 2;
+    const br = FIRE_RECT.w / 2 - 5;              // 按钮半径（随触屏放大）
+    const k = br / 26;                           // 图标缩放系数
+    if (fever > 0) {
+      // 奶龙时刻：按钮发金光 + 闪光圆环
+      const shine = Math.sin(performance.now() / 60) > 0;
+      ctx.fillStyle = shine ? "rgba(255,210,63,.45)" : "rgba(255,210,63,.2)";
+      ctx.beginPath(); ctx.arc(bx, by, br + 4, 0, 7); ctx.fill();
+      ctx.strokeStyle = shine ? "#ffd23f" : "#ffe873";
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(bx, by, br, 0, 7); ctx.stroke();
+      px(bx - 2 * k, by - 6 * k, 5 * k, 12 * k, "#ffd23f");   // 闪电 ⚡ 图标
+      px(bx - 4 * k, by - 10 * k, 9 * k, 3 * k, "#ffd23f");
+      px(bx - 4 * k, by + 4 * k, 9 * k, 3 * k, "#ffd23f");
+    } else {
+      ctx.fillStyle = ammo > 0 ? "rgba(20,12,45,.55)" : "rgba(20,12,45,.3)";
+      ctx.beginPath(); ctx.arc(bx, by, br, 0, 7); ctx.fill();
+      ctx.strokeStyle = ammo > 0 ? "#ffd23f" : "rgba(255,210,63,.35)";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(bx, by, br, 0, 7); ctx.stroke();
+      // 子弹图标
+      px(bx - 9 * k, by - 3 * k, 12 * k, 6 * k, ammo > 0 ? "#c9a227" : "rgba(201,162,39,.4)");
+      px(bx + 3 * k, by - 2 * k, 5 * k, 4 * k, ammo > 0 ? "#d96b4a" : "rgba(217,107,74,.4)");
+      px(bx - 7 * k, by - 2 * k, 2 * k, 4 * k, ammo > 0 ? "#f0d060" : "rgba(240,208,96,.4)");
+    }
+  }
+
+  /* ---------- 菜单 ---------- */
+  if (state === STATE.MENU) {
+    ctx.fillStyle = "rgba(20,12,45,.28)";
+    ctx.fillRect(0, 56, W, 86);
+
+    // 标题（上下轻微漂浮）
+    const ty = 66 + Math.round(Math.sin(performance.now() / 400) * 2);
+    pixelText("奶龙大冒险", W / 2 + 3, ty + 3, 38, "rgba(0,0,0,.45)", "center", false);
+    pixelText("奶龙大冒险", W / 2, ty, 38, "#ffd23f", "center", false);
+    // 标题描边感：两侧小像素点缀
+    px(W / 2 - 132, ty + 14, 8, 8, "#ff9aa9");
+    px(W / 2 + 124, ty + 14, 8, 8, "#ff9aa9");
+
+    // 模式选择按钮 + 分数奖励 + 详情 + 返回游戏大厅
+    drawButton(buttons.hub, hoverBtn === "hub");
+    drawButton(buttons.normal, hoverBtn === "normal");
+    drawButton(buttons.hard, hoverBtn === "hard");
+    drawButton(buttons.skins, hoverBtn === "skins");
+    drawButton(buttons.info, hoverBtn === "info");
+
+    if (!IS_TOUCH && Math.floor(performance.now() / 500) % 2 === 0) {
+      pixelText("空格键 = 普通模式快速开始", W / 2, 216, 11, "#ffffff", "center");
+    }
+    pixelText(IS_TOUCH ? "点击屏幕 = 跳跃（可三段跳，越跳越高）" : "点击鼠标 / 空格 = 跳跃（可三段跳，越跳越高）", W / 2, 246, 11, "#27503a", "center", false);
+    if (best > 0 || bestHard > 0) {
+      const s = bestHard > 0 ? "最高分 " + best + "  ·  进阶最高 " + bestHard : "最高分 " + best;
+      pixelText(s, W / 2, 234, 12, "#ffe873", "center");
+    }
+  }
+
+  /* ---------- 详情面板（首页点“详情”弹出，介绍两种模式与基本玩法） ---------- */
+  if (state === STATE.MENU && showInfo) {
+    ctx.fillStyle = "rgba(10,6,28,.78)";
+    ctx.fillRect(0, 0, W, H);
+
+    const ix = 34, iy = 14, iw = W - 68, ih = H - 44;
+    px(ix, iy, iw, ih, C.panel);
+    px(ix, iy, iw, 3, C.panelE);
+    px(ix, iy + ih - 3, iw, 3, C.panelE);
+    px(ix, iy, 3, ih, C.panelE);
+    px(ix + iw - 3, iy, 3, ih, C.panelE);
+
+    pixelText("玩法详情", W / 2, iy + 8, 20, "#ffd23f", "center", false);
+
+    const L = ix + 18;                       // 文本左缘
+    let ly = iy + 38;
+    const line = (s, c) => { pixelText(s, L, ly, 11, c || "#e8e2ff", "left", false); ly += 15; };
+
+    line("【基本玩法】", "#ffe873");
+    line("· 点击 / 触摸 / 空格：跳跃，最多三段跳");
+    line("· 躲开所有障碍物，碰到就失败");
+    ly += 5;
+    line("【普通模式】", "#ffe873");
+    line("· 经典跑酷，速度越来越快，挑战反应极限");
+    ly += 5;
+    line("【进阶模式】", "#ffe873");
+    line("· 提速更快，障碍更凶险");
+    line("· 拾取子弹可发射弹药，摧毁障碍或命中飞鸟额外得分");
+    line("· 达成目标分数触发「奶龙时刻」");
+    line("  短时间内无敌、超高速、无限弹药");
+
+    // 关闭提示（闪烁）
+    if (Math.floor(performance.now() / 400) % 2 === 0) {
+      pixelText("点击任意处返回", W / 2, iy + ih - 14, 11, "#ff9aa9", "center", false);
+    }
+  }
+
+  /* ---------- 分数奖励面板（形象解锁与选择） ---------- */
+  if (state === STATE.MENU && showSkins) {
+    ctx.fillStyle = "rgba(10,6,28,.78)";
+    ctx.fillRect(0, 0, W, H);
+
+    const ix = 30, iy = 14, iw = W - 60, ih = H - 36;
+    px(ix, iy, iw, ih, C.panel);
+    px(ix, iy, iw, 3, C.panelE);
+    px(ix, iy + ih - 3, iw, 3, C.panelE);
+    px(ix, iy, 3, ih, C.panelE);
+    px(ix + iw - 3, iy, 3, ih, C.panelE);
+
+    pixelText("分数奖励 · 形象", W / 2, iy + 10, 20, "#ffd23f", "center", false);
+    pixelText("进阶模式最高分解锁新形象", W / 2, iy + 30, 11, "#9fd8ff", "center");
+
+    for (const id of ["nailong", "snowking", "pacman", "lion"]) {
+      const sk = SKINS[id], b = SKIN_CARD[id];
+      const sel = skin === id, unl = bestHard >= sk.need;
+      // 卡片底 + 选中金边
+      px(b.x, b.y + 3, b.w, b.h, "#1b1436");
+      px(b.x, b.y, b.w, b.h, sel ? "#3a2f14" : "#2e2358");
+      if (sel) {
+        px(b.x, b.y, b.w, 3, "#ffd23f"); px(b.x, b.y + b.h - 3, b.w, 3, "#ffd23f");
+        px(b.x, b.y, 3, b.h, "#ffd23f"); px(b.x + b.w - 3, b.y, 3, b.h, "#ffd23f");
+      }
+      // 形象预览（3 倍放大；未解锁半透明剪影）
+      ctx.globalAlpha = unl ? 1 : 0.25;
+      drawSprite(sk.spr.runA, b.x + b.w / 2 - 24, b.y + 4, 3, sk.pal);
+      ctx.globalAlpha = 1;
+      pixelText(sk.name, b.x + b.w / 2, b.y + 56, 14, sel ? "#ffe873" : "#e8e2ff", "center", false);
+      if (unl) {
+        pixelText(sel ? "✓ 使用中" : "点击使用", b.x + b.w / 2, b.y + 76, 11, sel ? "#ffe873" : "#9fd8ff", "center");
+      } else {
+        pixelText("🔒 未解锁", b.x + b.w / 2, b.y + 72, 11, "#ff9aa9", "center");
+        pixelText(bestHard + "/" + sk.need, b.x + b.w / 2, b.y + 84, 9, "#cfc6f2", "center");
+        const pw2 = b.w - 24, pr = Math.min(1, bestHard / sk.need);
+        px(b.x + 12, b.y + 92, pw2, 5, "#1b1436");
+        px(b.x + 12, b.y + 92, Math.round(pw2 * pr), 5, "#ffd23f");
+      }
+      // 「技能」小按钮：点击弹出该形象的技能说明
+      const sb = skillBtnRect(id);
+      px(sb.x, sb.y, sb.w, sb.h, "#3d2f6e");
+      px(sb.x, sb.y, sb.w, 1, "#7a68c0"); px(sb.x, sb.y + sb.h - 1, sb.w, 1, "#241b47");
+      pixelText("技能", sb.x + sb.w / 2, sb.y + 2, 9, "#cfc6f2", "center", false);
+    }
+
+    if (Math.floor(performance.now() / 400) % 2 === 0) {
+      pixelText("点击卡片使用形象 · 点击空白处返回", W / 2, iy + ih - 14, 11, "#ff9aa9", "center", false);
+    }
+
+    /* ---- 技能说明弹窗（点卡片上的「技能」按钮打开） ---- */
+    if (showSkill && SKINS[showSkill]) {
+      const sk = SKINS[showSkill];
+      ctx.fillStyle = "rgba(10,6,28,.72)";
+      ctx.fillRect(0, 0, W, H);
+      const sw = 240, sh = 150, sx0 = (W - sw) / 2, sy0 = (H - sh) / 2 - 6;
+      px(sx0, sy0, sw, sh, C.panel);
+      px(sx0, sy0, sw, 3, C.panelE); px(sx0, sy0 + sh - 3, sw, 3, C.panelE);
+      px(sx0, sy0, 3, sh, C.panelE); px(sx0 + sw - 3, sy0, 3, sh, C.panelE);
+      pixelText(sk.name + " · 技能", W / 2, sy0 + 12, 17, "#ffd23f", "center", false);
+      // 形象预览（2 倍，未解锁也可查看技能）
+      drawSprite(sk.spr.runA, W / 2 - 16, sy0 + 34, 2, sk.pal);
+      sk.skillDesc.forEach((s, i) => {
+        pixelText(s, W / 2, sy0 + 76 + i * 15, 12, "#b8e6a0", "center", false);
+      });
+      if (Math.floor(performance.now() / 400) % 2 === 0) {
+        pixelText("点击任意处返回", W / 2, sy0 + sh - 20, 10, "#ff9aa9", "center", false);
+      }
+    }
+  }
+
+  /* ---------- 结束面板 ---------- */
+  if (state === STATE.OVER && overTimer > 0.35) {
+    ctx.fillStyle = "rgba(10,6,28,.72)";
+    ctx.fillRect(0, 0, W, H);
+
+    const px0 = 70, py0 = 50, pw = 340, ph = 182;
+    px(px0, py0, pw, ph, C.panel);
+    px(px0, py0, pw, 3, C.panelE);
+    px(px0, py0 + ph - 3, pw, 3, C.panelE);
+    px(px0, py0, 3, ph, C.panelE);
+    px(px0 + pw - 3, py0, 3, ph, C.panelE);
+
+    pixelText("游戏结束", W / 2, py0 + 14, 26, "#ff8a8a", "center");
+    pixelText("本次分数", W / 2 - 70, py0 + 56, 14, "#cfc6f2", "center");
+    pixelText(String(finalScore), W / 2 - 70, py0 + 76, 30, "#ffffff", "center");
+    pixelText("最高分数", W / 2 + 70, py0 + 56, 14, "#cfc6f2", "center");
+    pixelText(String(best), W / 2 + 70, py0 + 76, 30, "#ffe873", "center");
+
+    if (gameMode === "hard" && bestHard > 0) {
+      pixelText("进阶最高 " + bestHard, W / 2, py0 + 108, 12, "#9fd8ff", "center");
+    }
+    if (newUnlock) {
+      if (Math.floor(performance.now() / 350) % 2 === 0)
+        pixelText("🎉 达成 " + SKINS[newUnlock].need + " 分，解锁新形象：" + SKINS[newUnlock].name + "！", W / 2, py0 + 124, 13, "#ffe873", "center");
+    } else if (finalScore >= best && finalScore > 0) {
+      if (Math.floor(performance.now() / 350) % 2 === 0)
+        pixelText("★ 新纪录 ★", W / 2, py0 + 124, 13, "#ff9aa9", "center");
+    }
+
+    drawButton(buttons.retry, hoverBtn === "retry");
+    drawButton(buttons.home,  hoverBtn === "home");
+  }
+}
+
+/* ================= 主循环 ================= */
+let last = performance.now();
+function loop(now) {
+  let dt = (now - last) / 1000;
+  last = now;
+  if (dt > 0.05) dt = 0.05;   // 切后台后防穿模
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* ================= 输入 ================= */
+function canvasPos(e) {
+  const r = canvas.getBoundingClientRect();
+  const cx = (e.touches ? e.touches[0].clientX : e.clientX);
+  const cy = (e.touches ? e.touches[0].clientY : e.clientY);
+  if (wrapRotated) {
+    // #wrap 被 JS 旋转 90°：屏幕 x/y 与画布坐标互换
+    return {
+      x: W / 2 + (cy - (r.top + r.height / 2)) * W / r.height,
+      y: H / 2 - (cx - (r.left + r.width / 2)) * H / r.width
+    };
+  }
+  return {
+    x: (cx - r.left) / r.width * W,
+    y: (cy - r.top) / r.height * H
+  };
+}
+
+/* 进阶模式触屏发射按钮（画布内右下；触屏设备放大） */
+const FIRE_RECT = IS_TOUCH
+  ? { x: W - 100, y: H - 100, w: 88, h: 88 }
+  : { x: W - 74, y: H - 74, w: 62, h: 62 };
+
+function pressAt(p) {
+  ensureAudio();
+  if (state === STATE.MENU) {
+    if (showInfo || showSkins) {
+      // 技能弹窗打开时：任意点击仅关闭弹窗
+      if (showSkill) { showSkill = null; return; }
+      // 形象面板：点「技能」按钮看技能说明，点卡片即换装（面板保持打开），点空白处关闭
+      if (showSkins) {
+        let onCard = false;
+        for (const id of ["nailong", "snowking", "pacman", "lion"]) {
+          if (hit(p, skillBtnRect(id))) {
+            sfxClick();
+            showSkill = id;
+            return;
+          }
+          if (hit(p, SKIN_CARD[id])) {
+            onCard = true;
+            if (bestHard >= SKINS[id].need && skin !== id) {
+              sfxClick();
+              skin = id;
+              localStorage.setItem("nailong_skin", id);
+            }
+          }
+        }
+        if (onCard) return;
+      }
+      showInfo = false; showSkins = false;
+      return;
+    }
+    if (hit(p, buttons.hub)) { location.href = "../index.html"; return; }
+    if (hit(p, buttons.normal)) { sfxClick(); startGame("normal"); }
+    else if (hit(p, buttons.hard)) { sfxClick(); startGame("hard"); }
+    else if (hit(p, buttons.skins)) { sfxClick(); showSkins = true; }
+    else if (hit(p, buttons.info)) { sfxClick(); showInfo = true; }
+    return;
+  }
+  if (state === STATE.PLAY) {
+    if (gameMode === "hard" && hit(p, FIRE_RECT)) fire();
+    else doJump();
+    return;
+  }
+  if (state === STATE.OVER && overTimer > 0.35) {
+    if (hit(p, buttons.retry)) { sfxClick(); startGame(gameMode); }
+    else if (hit(p, buttons.home)) {
+      sfxClick();
+      state = STATE.MENU;
+      player.dead = false;
+      obstacles = [];
+      pickups = [];
+      projectiles = [];
+    }
+  }
+}
+function hit(p, b) {
+  return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h;
+}
+
+function touchPos(t) {
+  const r = canvas.getBoundingClientRect();
+  if (wrapRotated) {
+    return {
+      x: W / 2 + (t.clientY - (r.top + r.height / 2)) * W / r.height,
+      y: H / 2 - (t.clientX - (r.left + r.width / 2)) * H / r.width
+    };
+  }
+  return {
+    x: (t.clientX - r.left) / r.width * W,
+    y: (t.clientY - r.top) / r.height * H
+  };
+}
+
+canvas.addEventListener("mousedown", e => pressAt(canvasPos(e)));
+canvas.addEventListener("touchstart", e => {
+  e.preventDefault();
+  ensureAudio();
+  for (const t of e.changedTouches) {
+    const p = touchPos(t);
+    if (state === STATE.PLAY && gameMode === "hard" && hit(p, FIRE_RECT)) fire();
+    else pressAt(p);
+  }
+}, { passive: false });
+
+canvas.addEventListener("mousemove", e => {
+  const p = canvasPos(e);
+  if (state === STATE.OVER) {
+    hoverBtn = hit(p, buttons.retry) ? "retry" : hit(p, buttons.home) ? "home" : null;
+  } else if (state === STATE.MENU) {
+    hoverBtn = (showInfo || showSkins) ? null :
+      hit(p, buttons.hub) ? "hub" :
+      hit(p, buttons.normal) ? "normal" : hit(p, buttons.hard) ? "hard" :
+      hit(p, buttons.skins) ? "skins" : hit(p, buttons.info) ? "info" : null;
+  } else {
+    hoverBtn = null;
+  }
+  canvas.style.cursor = hoverBtn ? "pointer" : "default";
+});
+
+window.addEventListener("keydown", e => {
+  if (["Space", "ArrowUp", "KeyW", "Enter"].includes(e.code)) {
+    e.preventDefault();
+    ensureAudio();
+    if (state === STATE.MENU) { sfxClick(); startGame("normal"); }
+    else if (state === STATE.PLAY) doJump();
+    else if (state === STATE.OVER && e.code === "Enter") { sfxClick(); startGame(gameMode); }
+  }
+  // 进阶模式发射键：J / F / K
+  if (["KeyJ", "KeyF", "KeyK"].includes(e.code)) {
+    ensureAudio();
+    fire();
+  }
+});
+
+// 初始站位
+player.y = GROUND_Y - player.h;
+</script>
+</body>
+</html>
