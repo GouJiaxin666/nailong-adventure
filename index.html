@@ -1019,7 +1019,16 @@ function pixelText(str, x, y, size, color, align = "left", shadow = true) {
 }
 
 /* ================= 按钮 ================= */
-const buttons = {
+const IS_TOUCH = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+const MQ_ROTATED = window.matchMedia("(orientation: portrait) and (pointer: coarse)");
+// 触屏设备：全部按钮放大，方便手指点按
+const buttons = IS_TOUCH ? {
+  retry:  { x: 78,  y: 184, w: 150, h: 44, label: "再来一次" },
+  home:   { x: 252, y: 184, w: 150, h: 44, label: "返回首页" },
+  normal: { x: 78,  y: 126, w: 150, h: 46, label: "普通模式" },
+  hard:   { x: 252, y: 126, w: 150, h: 46, label: "进阶模式" },
+  info:   { x: 165, y: 180, w: 150, h: 40, label: "详情" }
+} : {
   retry:  { x: 96,  y: 194, w: 132, h: 34, label: "再来一次" },
   home:   { x: 252, y: 194, w: 132, h: 34, label: "返回首页" },
   normal: { x: 108, y: 132, w: 120, h: 36, label: "普通模式" },
@@ -1031,12 +1040,13 @@ let showInfo = false;   // 详情面板是否展开
 
 function drawButton(b, hover) {
   const c = hover ? "#ffe278" : C.btn;
+  const big = b.h >= 40;                     // 触屏大按钮：字号同步放大
   // 阴影底
   px(b.x, b.y + 3, b.w, b.h, "#7a5410");
   px(b.x, b.y, b.w, b.h, c);
   px(b.x, b.y, b.w, 3, "#fff0b0");
   px(b.x, b.y + b.h - 3, b.w, 3, C.btnD);
-  pixelText(b.label, b.x + b.w / 2, b.y + 8, 16, C.btnText, "center", false);
+  pixelText(b.label, b.x + b.w / 2, b.y + (big ? 12 : 8), big ? 19 : 16, C.btnText, "center", false);
 }
 
 /* 子弹拾取物：黄铜弹壳 + 铜头，上下浮动闪烁 */
@@ -1185,27 +1195,29 @@ function render() {
   /* ---------- 发射按钮（进阶模式，点击/触摸发射） ---------- */
   if (state === STATE.PLAY && gameMode === "hard") {
     const bx = FIRE_RECT.x + FIRE_RECT.w / 2, by = FIRE_RECT.y + FIRE_RECT.h / 2;
+    const br = FIRE_RECT.w / 2 - 5;              // 按钮半径（随触屏放大）
+    const k = br / 26;                           // 图标缩放系数
     if (fever > 0) {
       // 奶龙时刻：按钮发金光 + 闪光圆环
       const shine = Math.sin(performance.now() / 60) > 0;
       ctx.fillStyle = shine ? "rgba(255,210,63,.45)" : "rgba(255,210,63,.2)";
-      ctx.beginPath(); ctx.arc(bx, by, 30, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(bx, by, br + 4, 0, 7); ctx.fill();
       ctx.strokeStyle = shine ? "#ffd23f" : "#ffe873";
       ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(bx, by, 26, 0, 7); ctx.stroke();
-      px(bx - 2, by - 6, 5, 12, "#ffd23f");   // 闪电 ⚡ 图标
-      px(bx - 4, by - 10, 9, 3, "#ffd23f");
-      px(bx - 4, by + 4, 9, 3, "#ffd23f");
+      ctx.beginPath(); ctx.arc(bx, by, br, 0, 7); ctx.stroke();
+      px(bx - 2 * k, by - 6 * k, 5 * k, 12 * k, "#ffd23f");   // 闪电 ⚡ 图标
+      px(bx - 4 * k, by - 10 * k, 9 * k, 3 * k, "#ffd23f");
+      px(bx - 4 * k, by + 4 * k, 9 * k, 3 * k, "#ffd23f");
     } else {
       ctx.fillStyle = ammo > 0 ? "rgba(20,12,45,.55)" : "rgba(20,12,45,.3)";
-      ctx.beginPath(); ctx.arc(bx, by, 26, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(bx, by, br, 0, 7); ctx.fill();
       ctx.strokeStyle = ammo > 0 ? "#ffd23f" : "rgba(255,210,63,.35)";
       ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(bx, by, 26, 0, 7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(bx, by, br, 0, 7); ctx.stroke();
       // 子弹图标
-      px(bx - 9, by - 3, 12, 6, ammo > 0 ? "#c9a227" : "rgba(201,162,39,.4)");
-      px(bx + 3, by - 2, 5, 4, ammo > 0 ? "#d96b4a" : "rgba(217,107,74,.4)");
-      px(bx - 7, by - 2, 2, 4, ammo > 0 ? "#f0d060" : "rgba(240,208,96,.4)");
+      px(bx - 9 * k, by - 3 * k, 12 * k, 6 * k, ammo > 0 ? "#c9a227" : "rgba(201,162,39,.4)");
+      px(bx + 3 * k, by - 2 * k, 5 * k, 4 * k, ammo > 0 ? "#d96b4a" : "rgba(217,107,74,.4)");
+      px(bx - 7 * k, by - 2 * k, 2 * k, 4 * k, ammo > 0 ? "#f0d060" : "rgba(240,208,96,.4)");
     }
   }
 
@@ -1227,11 +1239,11 @@ function render() {
     drawButton(buttons.hard, hoverBtn === "hard");
     drawButton(buttons.info, hoverBtn === "info");
 
-    if (Math.floor(performance.now() / 500) % 2 === 0) {
+    if (!IS_TOUCH && Math.floor(performance.now() / 500) % 2 === 0) {
       pixelText("空格键 = 普通模式快速开始", W / 2, 216, 11, "#ffffff", "center");
     }
-    pixelText("点击鼠标 / 空格 = 跳跃（可三段跳，越跳越高）", W / 2, 246, 11, "#27503a", "center", false);
-    if (best > 0) pixelText("最高分 " + best, W / 2, 232, 12, "#ffe873", "center");
+    pixelText(IS_TOUCH ? "点击屏幕 = 跳跃（可三段跳，越跳越高）" : "点击鼠标 / 空格 = 跳跃（可三段跳，越跳越高）", W / 2, 246, 11, "#27503a", "center", false);
+    if (best > 0) pixelText("最高分 " + best, W / 2, 234, 12, "#ffe873", "center");
   }
 
   /* ---------- 详情面板（首页点“详情”弹出，介绍两种模式与基本玩法） ---------- */
@@ -1313,8 +1325,6 @@ function loop(now) {
 requestAnimationFrame(loop);
 
 /* ================= 输入 ================= */
-const IS_TOUCH = "ontouchstart" in window || navigator.maxTouchPoints > 0;
-const MQ_ROTATED = window.matchMedia("(orientation: portrait) and (pointer: coarse)");
 function canvasPos(e) {
   const r = canvas.getBoundingClientRect();
   const cx = (e.touches ? e.touches[0].clientX : e.clientX);
@@ -1332,8 +1342,10 @@ function canvasPos(e) {
   };
 }
 
-/* 进阶模式触屏发射按钮（画布内右下） */
-const FIRE_RECT = { x: W - 74, y: H - 74, w: 62, h: 62 };
+/* 进阶模式触屏发射按钮（画布内右下；触屏设备放大） */
+const FIRE_RECT = IS_TOUCH
+  ? { x: W - 100, y: H - 100, w: 88, h: 88 }
+  : { x: W - 74, y: H - 74, w: 62, h: 62 };
 
 function pressAt(p) {
   ensureAudio();
