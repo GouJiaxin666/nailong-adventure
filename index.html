@@ -1207,7 +1207,7 @@ function render() {
     ctx.fillStyle = "rgba(10,6,28,.78)";
     ctx.fillRect(0, 0, W, H);
 
-    const ix = 34, iy = 18, iw = W - 68, ih = H - 52;
+    const ix = 34, iy = 14, iw = W - 68, ih = H - 44;
     px(ix, iy, iw, ih, C.panel);
     px(ix, iy, iw, 3, C.panelE);
     px(ix, iy + ih - 3, iw, 3, C.panelE);
@@ -1230,12 +1230,13 @@ function render() {
     line("【进阶模式】", "#ffe873");
     line("· 提速更快，障碍更凶险");
     line("· 拾取子弹可发射弹药，摧毁障碍额外得分");
+    line("· 子弹命中飞鸟可获得更高分");
     line("· 达成目标分数触发「奶龙时刻」");
     line("  短时间内无敌、超高速、无限弹药");
 
     // 关闭提示（闪烁）
     if (Math.floor(performance.now() / 400) % 2 === 0) {
-      pixelText("点击任意处返回", W / 2, iy + ih - 20, 11, "#ff9aa9", "center", false);
+      pixelText("点击任意处返回", W / 2, iy + ih - 14, 11, "#ff9aa9", "center", false);
     }
   }
 
