@@ -534,7 +534,9 @@ function update(dt) {
         const sx = o.wx - worldX + PLAYER_SCREEN_X;
         if (sx < -60 || sx > W + 30) continue;
         const ob = obstacleBox(o, sx);
-        if (p.x + 8 > ob.x && p.x < ob.x + ob.w && p.y + 4 > ob.y && p.y < ob.y + ob.h) {
+        // 弹药命中盒：比玩家碰撞盒宽大（横向±4、纵向到地面），低矮的刺虫/荆棘也能打中
+        const hb = { x: sx - 4, y: GROUND_Y - o.h - 6, w: o.w + 8, h: o.h + 6 };
+        if (p.x + 8 > hb.x && p.x < hb.x + hb.w && p.y + 4 > hb.y && p.y < hb.y + hb.h) {
           p.dead = true;
           o.dead = true;
           scoreBonus += 100;
