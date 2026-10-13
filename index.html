@@ -776,32 +776,33 @@ const SNOWKING_PAL = {
   "#": "#1a1a1a", "w": "#ffffff", "v": "#c9d8ea", "b": "#2f6fd6",
   "o": "#f08c1e", "r": "#e33b2e", "g": "#f6c445", "c": "#fdf3e0", "t": "#d99a56"
 };
-// 雪王：金冠 + 白圆身 + 蓝眼 + 橙红笑嘴 + 红披风 + 左手冰淇淋权杖
+// 雪王：金冠 + 圆润白圆身(对称椭圆弧) + 蓝眼 + 橙红笑嘴 + 红披风 + 左手冰淇淋权杖
+// ★ 对称椭圆渐变：上半7列→8列→10列，中间10列，下半8列→7列
+// ★★ 每行必须恰好16字符，否则绘制错位！
 const SNOWKING_BODY = [
-  ".cc..g..g..g....",
-  "cccc.ggggggg....",
-  ".tt.#wwwwwwww#..",
-  "..t.#wwwwwwww#..",
-  "..g#wwwwwwwwww#.",
-  "..g#wwwwwwwwww#.",
-  "..g#wwbbwwbbww#.",
-  "..g#wwbbwwbbww#.",
-  "..g#wwwwooooww#.",
-  "..g#wwworrrrow#.",
-  "..g#wwwwooooww#.",
-  "..g#wwwwwwwwww#.",
-  "..g#wwwwwwwwww#.",
-  ".rr#wwwwwwwwww#.",
-  "rr.#wwwwwwww#...",
-  "....vv....vv...."
+  ".cc..g..g..g....",    // r0 皇冠齿
+  "cccc.ggggggg....",    // r1 皇冠底
+  ".tt..#wwwwwww#..",    // r2 头顶圆弧(白7列)：左#c5, 右#c13
+  "..t.#wwwwwwww#..",    // r3 头顶渐宽(白8列)：左#c4, 右#c13
+  "..g#wwwwwwwwww#.",    // r4 最宽开始(白10列)：左#c3, 右#c14
+  "..g#wwwwwwwwww#.",    // r5 最宽保持
+  "..g#wwbbwwbbww#.",    // r6 眼睛
+  "..g#wwbbwwbbww#.",    // r7 眼睛
+  "..g#wwwwooooww#.",    // r8 嘴顶
+  "..g#wwworrrrow#.",    // r9 嘴底(白10列：www+o+rrrr+o+w)
+  "..g#wwwwooooww#.",    // r10 嘴底
+  "..g#wwwwwwwwww#.",    // r11 全白
+  "..g.#wwwwwwww#..",    // r12 开始收窄(白8列)：左#c4, 右#c13
+  ".rr..#wwwwwww#..",    // r13 继续收(白7列)：披风rr(c1-2), 左#c5, 右#c13
+  "rr...#wwwwwww#..",    // r14 最窄(白7列)：披风rr(c0-1), 左#c5, 右#c13
+  "rr.gcc.......vv."     // r15 脚底+权杖：金柄g(c2), 冰淇淋cc(c3-4), 脚vv(c12-13)
 ];
-// 跑步第二帧：跨步
+// 跑步第二帧：前脚错开半步
 const SNOWKING_RUNB = SNOWKING_BODY.slice();
-SNOWKING_RUNB[15] = "...vv......vv...";
-// 空中帧：收脚 + 披风微扬
+SNOWKING_RUNB[15] = "rr.gcc......vvv.";   // 脚错开
+// 空中帧：收脚 + 权杖上收
 const SNOWKING_JUMP = SNOWKING_BODY.slice();
-SNOWKING_JUMP[14] = ".rr#wwwwwwww#...";
-SNOWKING_JUMP[15] = "................";
+SNOWKING_JUMP[15] = "rr.gcc..........";
 const SNOWKING_SPR = { runA: SNOWKING_BODY, runB: SNOWKING_RUNB, jump: SNOWKING_JUMP };
 
 const SKINS = {
