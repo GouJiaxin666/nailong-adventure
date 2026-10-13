@@ -959,9 +959,11 @@ const buttons = {
   retry:  { x: 96,  y: 194, w: 132, h: 34, label: "再来一次" },
   home:   { x: 252, y: 194, w: 132, h: 34, label: "返回首页" },
   normal: { x: 108, y: 132, w: 120, h: 36, label: "普通模式" },
-  hard:   { x: 252, y: 132, w: 120, h: 36, label: "进阶模式" }
+  hard:   { x: 252, y: 132, w: 120, h: 36, label: "进阶模式" },
+  info:   { x: 180, y: 178, w: 120, h: 30, label: "详情" }
 };
 let hoverBtn = null;
+let showInfo = false;   // 详情面板是否展开
 
 function drawButton(b, hover) {
   const c = hover ? "#ffe278" : C.btn;
@@ -1123,15 +1125,53 @@ function render() {
     px(W / 2 - 132, ty + 14, 8, 8, "#ff9aa9");
     px(W / 2 + 124, ty + 14, 8, 8, "#ff9aa9");
 
-    // 模式选择按钮
+    // 模式选择按钮 + 详情按钮
     drawButton(buttons.normal, hoverBtn === "normal");
     drawButton(buttons.hard, hoverBtn === "hard");
+    drawButton(buttons.info, hoverBtn === "info");
 
     if (Math.floor(performance.now() / 500) % 2 === 0) {
-      pixelText("空格键 = 普通模式快速开始", W / 2, 200, 11, "#ffffff", "center");
+      pixelText("空格键 = 普通模式快速开始", W / 2, 216, 11, "#ffffff", "center");
     }
-    pixelText("点击鼠标 / 空格 = 跳跃（可三段跳，越跳越高）", W / 2, 240, 11, "#27503a", "center", false);
-    if (best > 0) pixelText("最高分 " + best, W / 2, 222, 12, "#ffe873", "center");
+    pixelText("点击鼠标 / 空格 = 跳跃（可三段跳，越跳越高）", W / 2, 246, 11, "#27503a", "center", false);
+    if (best > 0) pixelText("最高分 " + best, W / 2, 232, 12, "#ffe873", "center");
+  }
+
+  /* ---------- 详情面板（首页点“详情”弹出，介绍两种模式与基本玩法） ---------- */
+  if (state === STATE.MENU && showInfo) {
+    ctx.fillStyle = "rgba(10,6,28,.78)";
+    ctx.fillRect(0, 0, W, H);
+
+    const ix = 34, iy = 18, iw = W - 68, ih = H - 52;
+    px(ix, iy, iw, ih, C.panel);
+    px(ix, iy, iw, 3, C.panelE);
+    px(ix, iy + ih - 3, iw, 3, C.panelE);
+    px(ix, iy, 3, ih, C.panelE);
+    px(ix + iw - 3, iy, 3, ih, C.panelE);
+
+    pixelText("玩法详情", W / 2, iy + 8, 20, "#ffd23f", "center", false);
+
+    const L = ix + 18;                       // 文本左缘
+    let ly = iy + 38;
+    const line = (s, c) => { pixelText(s, L, ly, 11, c || "#e8e2ff", "left", false); ly += 15; };
+
+    line("【基本玩法】", "#ffe873");
+    line("· 点击 / 触摸 / 空格：跳跃，最多三段跳，段数越高跳得越高");
+    line("· 躲开石头、仙人掌、荆棘、拳套盒、刺虫，碰到就失败");
+    ly += 5;
+    line("【普通模式】", "#ffe873");
+    line("· 经典跑酷：速度随路程缓慢提升，挑战你的反应极限");
+    ly += 5;
+    line("【进阶模式】", "#ffe873");
+    line("· 20 秒后持续提速，80 秒达到极速，障碍更凶险");
+    line("· 拾取子弹获得弹药（最多 3 枚），J / 发射键击毁障碍 +100 分");
+    line("· 2000 分触发「奶龙时刻」：8 秒无敌 + 超高速 + 无限弹药");
+    line("  之后每再获 4000 分可再次触发");
+
+    // 关闭提示（闪烁）
+    if (Math.floor(performance.now() / 400) % 2 === 0) {
+      pixelText("点击任意处返回", W / 2, iy + ih - 20, 11, "#ff9aa9", "center", false);
+    }
   }
 
   /* ---------- 结束面板 ---------- */
@@ -1200,8 +1240,10 @@ const FIRE_RECT = { x: W - 74, y: H - 74, w: 62, h: 62 };
 function pressAt(p) {
   ensureAudio();
   if (state === STATE.MENU) {
+    if (showInfo) { showInfo = false; return; }
     if (hit(p, buttons.normal)) { sfxClick(); startGame("normal"); }
     else if (hit(p, buttons.hard)) { sfxClick(); startGame("hard"); }
+    else if (hit(p, buttons.info)) { sfxClick(); showInfo = true; }
     return;
   }
   if (state === STATE.PLAY) {
@@ -1255,7 +1297,8 @@ canvas.addEventListener("mousemove", e => {
   if (state === STATE.OVER) {
     hoverBtn = hit(p, buttons.retry) ? "retry" : hit(p, buttons.home) ? "home" : null;
   } else if (state === STATE.MENU) {
-    hoverBtn = hit(p, buttons.normal) ? "normal" : hit(p, buttons.hard) ? "hard" : null;
+    hoverBtn = showInfo ? null :
+      hit(p, buttons.normal) ? "normal" : hit(p, buttons.hard) ? "hard" : hit(p, buttons.info) ? "info" : null;
   } else {
     hoverBtn = null;
   }
