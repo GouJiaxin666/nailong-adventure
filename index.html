@@ -30,6 +30,19 @@
       transform: rotate(90deg);
     }
   }
+  /* 触屏设备：画布铺满全屏（桌面保留 96% 留边更好看） */
+  @media (pointer: coarse) {
+    #wrap {
+      width: min(100vw, calc(100vh * 16 / 9));
+      width: min(100vw, calc(100svh * 16 / 9));   /* 移动浏览器地址栏安全高度 */
+    }
+  }
+  @media (orientation: portrait) and (pointer: coarse) {
+    #wrap {
+      width: min(calc(100vw * 16 / 9), 100vh);
+      width: min(calc(100vw * 16 / 9), 100svh);
+    }
+  }
   canvas {
     display: block;
     width: 100%;
