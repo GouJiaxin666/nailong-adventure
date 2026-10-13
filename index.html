@@ -342,7 +342,7 @@ function fire() {
     if (ammo <= 0) return;
     ammo--;
   }
-  fireCd = 0.35;
+  fireCd = 0.3;
   projectiles.push({ x: player.x + 20, y: player.y + 12, vx: 520, dead: false });
   sfxFire();
   for (let i = 0; i < 4; i++) {
