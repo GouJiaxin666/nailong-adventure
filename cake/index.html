@@ -56,7 +56,7 @@ const W = 960, H = 540;
 /* ================= 物理常量 ================= */
 const GRAVITY = 2200;
 const MOVE_SPEED = 270;
-const JUMP_V = -980;          // 跳跃高度 ≈ 194px+（帧率无关地够上右侧中台 164px，含余量）
+const JUMP_V = -690;          // 跳跃高度 ≈ 108px（约为原高度一半），台阶纵向间距按 85px 设计留足余量
 const FALL_LIMIT = 640;       // 掉出屏幕底部 → 重生
 
 /* ================= 调色板 ================= */
@@ -151,7 +151,7 @@ function pixelText(str, x, y, size, color, align = "left", shadow = true) {
    hazards ：危险物（碰到即重生，第一关暂无） */
 const LEVELS = [
   {
-    name: "第一关 · 乘电梯吃蛋糕",
+    name: "奶油的醇厚",
     spawn: { x: 90, y: 470 },
     cake: { x: 150, y: 153 },          // 蛋糕中心（坐在蛋糕台顶面）
     home: { x: 640, y: 153 },          // 家的中心（坐在家平台顶面）
@@ -165,8 +165,10 @@ const LEVELS = [
     ],
     oneways: [
       { x: 0,   y: 153, w: 295, h: 16, kind: "float" },    // 蛋糕台
-      { x: 500, y: 153, w: 280, h: 16, kind: "float" },    // 家平台
-      { x: 775, y: 306, w: 180, h: 16, kind: "float" }     // 右侧中台
+      { x: 500, y: 153, w: 310, h: 16, kind: "float" },    // 家平台（右缘810与台阶三重叠，任意位置左跳均可上台）
+      { x: 790, y: 385, w: 165, h: 16, kind: "float" },    // 右侧台阶一
+      { x: 805, y: 300, w: 150, h: 16, kind: "float" },    // 右侧台阶二
+      { x: 790, y: 215, w: 165, h: 16, kind: "float" }     // 右侧台阶三（左跳即到家平台）
     ],
     movers: [
       // 纵向电梯：底部地面 ↔ 蛋糕台高度（顶部与蛋糕台齐平，便于往返行走），到终点停 2 秒折返
@@ -237,7 +239,7 @@ function loadLevel(i) {
   cakeEaten = false;
   particles = [];
   toast = ""; toastT = 0;
-  hintT = 4.5;
+  hintT = i === 0 ? 8 : 4.5;   // 第一关新手教程面板多展示一会
   winT = 0;
   respawnPlayer(true);
 }
@@ -682,13 +684,73 @@ function drawHUD() {
   pixelText(cakeEaten ? "🍰 已到手 → 🏠 快回家！" : "🍰 先吃蛋糕，🏠 才会开门", W / 2, 36, 12, "#fff", "center");
   // 复活提示
   if (toastT > 0) pixelText(toast, W / 2, 60, 13, "#ffe873", "center");
-  // 操作提示
-  if (hintT > 0 && state === ST.PLAY) {
+  // 操作提示（第一关由新手教程系统接管，不在底部重复显示）
+  if (hintT > 0 && state === ST.PLAY && levelIdx !== 0) {
     ctx.globalAlpha = Math.min(1, hintT);
     pixelText(IS_TOUCH ? "左半屏拖动 = 移动 · 右半屏点按 = 跳跃" : "←→/AD 移动 · 空格/↑ 跳跃 · R 重开本关",
               W / 2, H - 26, 12, "#fff", "center");
     ctx.globalAlpha = 1;
   }
+}
+/* ================= 新手教程（仅第一关） ================= */
+function drawBubble(lines, cx, cy) {
+  const lh = 18, padX = 12, padY = 8;
+  ctx.font = 'bold 13px "Courier New", monospace';
+  let w = 0;
+  for (const s of lines) w = Math.max(w, ctx.measureText(s).width);
+  w = Math.ceil(w) + padX * 2;
+  const h = lines.length * lh + padY * 2 - 4;
+  const x = Math.max(6, Math.min(W - w - 6, cx - w / 2));
+  const y = Math.max(52, Math.min(H - h - 6, cy));
+  ctx.fillStyle = "rgba(20,12,45,.82)";
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = "rgba(255,210,63,.85)"; ctx.lineWidth = 2;
+  ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+  lines.forEach((s, i) => pixelText(s, x + w / 2, y + padY + i * lh, 13, "#fff", "center", false));
+}
+function drawTutorial() {
+  if (levelIdx !== 0 || state !== ST.PLAY) return;
+  // 开局规则面板：操作 + 游戏规则
+  if (hintT > 0) {
+    const bw = 470, bh = 128, x0 = (W - bw) / 2, y0 = 74;
+    ctx.globalAlpha = Math.min(1, hintT / 1.5);
+    px(x0 + 4, y0 + 4, bw, bh, "rgba(0,0,0,.35)");
+    px(x0, y0, bw, bh, "rgba(20,12,45,.9)");
+    px(x0, y0, bw, 4, C.panelE); px(x0, y0 + bh - 4, bw, 4, C.panelE);
+    pixelText("🎮 新手教程", W / 2, y0 + 12, 20, "#ffd23f", "center", false);
+    pixelText(IS_TOUCH ? "移动：按住左半屏拖动 · 跳跃：点右侧「跳」键" : "移动：← → / A D · 跳跃：空格 / ↑",
+              W / 2, y0 + 48, 14, "#fff", "center", false);
+    pixelText("规则：吃到蛋糕 → 家门打开 → 回家即过关", W / 2, y0 + 74, 14, "#cfe8ff", "center", false);
+    pixelText("小心别摔出画面，摔下去会回到出生点", W / 2, y0 + 98, 12, "#9fd8ff", "center", false);
+    ctx.globalAlpha = 1;
+  }
+  // 情境提示气泡：跟着玩家进度走
+  const feet = player.y + player.h;
+  const m = LV.movers[0];
+  const onMover = player.stand === m;
+  let lines = null, cx = 0, cy = 0;
+  if (!cakeEaten) {
+    if (feet > 460 && player.x < 280 && !onMover) {
+      lines = ["移动：" + (IS_TOUCH ? "左半屏摇杆" : "← → / A D"), "走向右边的电梯 →"]; cx = 150; cy = 350;
+    } else if (feet > 460 && player.x < 442 && !onMover) {
+      lines = ["站上去，电梯会载你上高处"]; cx = 368; cy = 400;
+    } else if (onMover && feet > 170) {
+      lines = ["电梯上升中…"]; cx = 368; cy = Math.min(feet - 90, 430);
+    } else if (feet <= 170) {
+      lines = ["向左走，吃掉蛋糕 🍰"]; cx = 150; cy = 210;
+    }
+  } else {
+    if (feet <= 170 || (onMover && m.y < 460)) {
+      lines = ["蛋糕到手！乘电梯下去 →"]; cx = 368; cy = 230;
+    } else if (feet > 460 && player.x < 700) {
+      lines = ["向右走到底"]; cx = 620; cy = 390;
+    } else if (feet > 460) {
+      lines = ["跳跃：" + (IS_TOUCH ? "点右侧「跳」键" : "空格 / ↑"), "连跳三层台阶上去"]; cx = 800; cy = 320;
+    } else {
+      lines = ["继续上跳，再向左回家 🏠"]; cx = 700; cy = 250;
+    }
+  }
+  if (lines) drawBubble(lines, cx, cy);
 }
 function drawTouchControls() {
   if (!IS_TOUCH) return;
@@ -743,6 +805,7 @@ function render() {
 
   if (state === ST.PLAY) {
     drawHUD();
+    drawTutorial();
     drawHubButton();
     drawTouchControls();
   } else if (state === ST.MENU) {
