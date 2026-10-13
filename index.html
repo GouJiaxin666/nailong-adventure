@@ -432,7 +432,7 @@ function spawnObstacle(wx) {
   // 三档高度（地面到障碍顶）：
   //  低 28~48：一跳即可越过（一跳极限 ≈ 59）
   //  中 100~115：需要两段跳（两跳可达 ≈ 132）
-  //  高 150~190：必须三段跳（三段极限 ≈ 222，仍高于最高障碍）
+  //  高 150~180：必须三段跳（三段极限 ≈ 222，仍高于最高障碍）
   const r = Math.random();
   let o;
   if (score < 90) {
@@ -447,7 +447,7 @@ function spawnObstacle(wx) {
     else o = { type: "cactus", wx, w: 14, h: Math.round(34 + Math.random() * 14) };
   } else {
     // 后期：低 / 中 / 高 + 荆棘 / 拳套盒 / 刺虫
-    if (r < 0.14) o = { type: "cactus", wx, w: 15, h: Math.round(150 + Math.random() * 40), tier: 3 };
+    if (r < 0.14) o = { type: "cactus", wx, w: 15, h: Math.round(150 + Math.random() * 30), tier: 3 };
     else if (r < 0.32) o = { type: "cactus", wx, w: 14, h: Math.round(100 + Math.random() * 15), tier: 2 };
     else if (r < 0.48) o = { type: "thorn", wx, w: Math.round(52 + Math.random() * 36), h: Math.round(10 + Math.random() * 3), tier: 1 };
     else if (r < 0.62) o = { type: "glovebox", wx, w: 18, h: 18, t: 0 };
@@ -492,8 +492,9 @@ function update(dt) {
 
   /* ---- PLAY ---- */
   playTime += dt;
-  // 进阶模式：20s 后开始提速，80s 达到最高速度（普通模式速度曲线不变）
+  // 进阶模式：20s 后开始提速，80s 达到 340；120s 后再用 20s 逐渐提高至 360（普通模式速度曲线不变）
   const ramp = gameMode === "hard" ? Math.min(1, Math.max(0, (playTime - 20) / 60)) : 0;
+  const lateRamp = gameMode === "hard" ? Math.min(1, Math.max(0, (playTime - 120) / 20)) : 0;
   bugSpeedMul = 1 + ramp * 0.7;
   // 奶龙时刻：到达分数阈值触发（首次 2000，之后每 +4000 一次），8 秒固定超高速 + 无敌 + 无限弹药
   // 吃豆人技能：奶龙时刻持续时间 +2 秒
@@ -520,7 +521,7 @@ function update(dt) {
     }
     speed = FEVER_SPEED;   // 固定高速，可超过正常上限
   } else {
-    speed = Math.min(gameMode === "hard" ? 340 : MAX_SPEED, BASE_SPEED + worldX / 260 + ramp * 140);
+    speed = Math.min(gameMode === "hard" ? 340 + lateRamp * 20 : MAX_SPEED, BASE_SPEED + worldX / 260 + ramp * 140 + lateRamp * 20);
   }
   feverGrace = Math.max(0, feverGrace - dt);   // 宽限衰减
   reviveInvuln = Math.max(0, reviveInvuln - dt);   // 奶龙复活无敌衰减
@@ -907,7 +908,7 @@ const SKINS = {
   },
   snowking: {
     name: "雪王", need: 6000, spr: SNOWKING_SPR, pal: SNOWKING_PAL,
-    skillDesc: ["发射子弹后的 1.2 秒内", "可免费再发射一次（不耗弹）"],
+    skillDesc: ["发射子弹后的 1.2 秒内", "可免费再发射一次"],
     pc: ["#ffffff", "#c9d8ea"],
     blink: { fill: "#ffffff", line: "#5a6b80", r: [12, -20, 10, 4], l: [13, -18, 8, 1] },
     dead: { col: "#1a1a1a",
