@@ -23,6 +23,13 @@
     position: relative;
     width: min(96vw, calc(96vh * 16 / 9));
   }
+  /* 移动端竖屏打开：整体旋转 90° 横屏游玩（旋转手机后自动变为全屏横屏） */
+  @media (orientation: portrait) and (pointer: coarse) {
+    #wrap {
+      width: min(calc(96vw * 16 / 9), 96vh);
+      transform: rotate(90deg);
+    }
+  }
   canvas {
     display: block;
     width: 100%;
@@ -34,6 +41,7 @@
     box-shadow: 0 0 0 4px #4a3a86, 0 18px 50px rgba(0,0,0,.6);
     cursor: pointer;
     background: #8fd3ff;
+    touch-action: none;   /* 移动端禁下拉刷新/双击缩放 */
   }
 </style>
 </head>
@@ -923,8 +931,22 @@ function render() {
           px(ax + 1, ay, 6, 8, "rgba(0,0,0,.25)");
         }
       }
-      pixelText("J 发射", 52, 44, 10, "#ffe873", "left");
+      if (!IS_TOUCH) pixelText("J 发射", 52, 44, 10, "#ffe873", "left");
     }
+  }
+
+  /* ---------- 发射按钮（进阶模式，点击/触摸发射） ---------- */
+  if (state === STATE.PLAY && gameMode === "hard") {
+    const bx = FIRE_RECT.x + FIRE_RECT.w / 2, by = FIRE_RECT.y + FIRE_RECT.h / 2;
+    ctx.fillStyle = ammo > 0 ? "rgba(20,12,45,.55)" : "rgba(20,12,45,.3)";
+    ctx.beginPath(); ctx.arc(bx, by, 26, 0, 7); ctx.fill();
+    ctx.strokeStyle = ammo > 0 ? "#ffd23f" : "rgba(255,210,63,.35)";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(bx, by, 26, 0, 7); ctx.stroke();
+    // 子弹图标
+    px(bx - 9, by - 3, 12, 6, ammo > 0 ? "#c9a227" : "rgba(201,162,39,.4)");
+    px(bx + 3, by - 2, 5, 4, ammo > 0 ? "#d96b4a" : "rgba(217,107,74,.4)");
+    px(bx - 7, by - 2, 2, 4, ammo > 0 ? "#f0d060" : "rgba(240,208,96,.4)");
   }
 
   /* ---------- 菜单 ---------- */
@@ -992,15 +1014,27 @@ function loop(now) {
 requestAnimationFrame(loop);
 
 /* ================= 输入 ================= */
+const IS_TOUCH = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+const MQ_ROTATED = window.matchMedia("(orientation: portrait) and (pointer: coarse)");
 function canvasPos(e) {
   const r = canvas.getBoundingClientRect();
   const cx = (e.touches ? e.touches[0].clientX : e.clientX);
   const cy = (e.touches ? e.touches[0].clientY : e.clientY);
+  if (MQ_ROTATED.matches) {
+    // #wrap 被 CSS 旋转 90°：屏幕 x/y 与画布坐标互换
+    return {
+      x: W / 2 + (cy - (r.top + r.height / 2)) * W / r.height,
+      y: H / 2 - (cx - (r.left + r.width / 2)) * H / r.width
+    };
+  }
   return {
     x: (cx - r.left) / r.width * W,
     y: (cy - r.top) / r.height * H
   };
 }
+
+/* 进阶模式触屏发射按钮（画布内右下） */
+const FIRE_RECT = { x: W - 74, y: H - 74, w: 62, h: 62 };
 
 function pressAt(p) {
   ensureAudio();
@@ -1010,7 +1044,8 @@ function pressAt(p) {
     return;
   }
   if (state === STATE.PLAY) {
-    doJump();
+    if (gameMode === "hard" && hit(p, FIRE_RECT)) fire();
+    else doJump();
     return;
   }
   if (state === STATE.OVER && overTimer > 0.35) {
@@ -1029,10 +1064,29 @@ function hit(p, b) {
   return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h;
 }
 
+function touchPos(t) {
+  const r = canvas.getBoundingClientRect();
+  if (MQ_ROTATED.matches) {
+    return {
+      x: W / 2 + (t.clientY - (r.top + r.height / 2)) * W / r.height,
+      y: H / 2 - (t.clientX - (r.left + r.width / 2)) * H / r.width
+    };
+  }
+  return {
+    x: (t.clientX - r.left) / r.width * W,
+    y: (t.clientY - r.top) / r.height * H
+  };
+}
+
 canvas.addEventListener("mousedown", e => pressAt(canvasPos(e)));
 canvas.addEventListener("touchstart", e => {
   e.preventDefault();
-  pressAt(canvasPos(e));
+  ensureAudio();
+  for (const t of e.changedTouches) {
+    const p = touchPos(t);
+    if (state === STATE.PLAY && gameMode === "hard" && hit(p, FIRE_RECT)) fire();
+    else pressAt(p);
+  }
 }, { passive: false });
 
 canvas.addEventListener("mousemove", e => {
