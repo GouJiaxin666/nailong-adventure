@@ -95,6 +95,8 @@ let worldX = 0;          // 奶龙的世界坐标（也是路程）
 let speed = BASE_SPEED;
 let score = 0;
 let best = +(localStorage.getItem("nailong_best") || 0);
+let bestHard = +(localStorage.getItem("nailong_best_hard") || 0);   // 进阶模式历史最高分（解锁形象用）
+let newUnlock = false;                                              // 本局是否刚达成解锁
 
 const player = {
   x: PLAYER_SCREEN_X, y: 0,
@@ -275,6 +277,7 @@ function resetGame() {
   feverGrace = 0;
   feverBgmStop();
   nextFeverAt = 2000;
+  newUnlock = false;
   player.y = GROUND_Y - player.h;
   player.vy = 0;
   player.jumps = 0;
@@ -295,15 +298,22 @@ function gameOver() {
     best = score;
     localStorage.setItem("nailong_best", best);
   }
+  // 进阶模式最高分记录 → 解锁形象
+  if (gameMode === "hard" && score > bestHard) {
+    if (bestHard < 6000 && score >= 6000) newUnlock = true;   // 首次跨过雪王解锁线
+    bestHard = score;
+    localStorage.setItem("nailong_best_hard", bestHard);
+  }
   sfxDie();
-  // 死亡碎片
+  // 死亡碎片（颜色随形象）
+  const skc = SKINS[skin].pc;
   for (let i = 0; i < 14; i++) {
     particles.push({
       x: player.x + 12, y: player.y + 10,
       vx: (Math.random() - 0.5) * 220,
       vy: -Math.random() * 220 - 40,
       life: 0.7 + Math.random() * 0.4,
-      color: Math.random() < 0.5 ? C.yellow : C.yellowD,
+      color: Math.random() < 0.5 ? skc[0] : skc[1],
       size: 2 + Math.random() * 2
     });
   }
@@ -760,11 +770,71 @@ NAILONG_JUMP[14] = ".....yyyyyy.....";
 NAILONG_JUMP[15] = "................";
 const SPR = { runA: NAILONG_BODY, runB: NAILONG_RUNB, jump: NAILONG_JUMP };
 
-function drawSprite(map, ox, oy, scale = 2) {
+/* ================= 形象（皮肤）系统 =================
+   奶龙 = 初始形象；雪王 = 进阶模式最高分达 6000 解锁 */
+const SNOWKING_PAL = {
+  "#": "#1a1a1a", "w": "#ffffff", "v": "#c9d8ea", "b": "#2f6fd6",
+  "o": "#f08c1e", "r": "#e33b2e", "g": "#f6c445", "c": "#fdf3e0", "t": "#d99a56"
+};
+// 雪王：金冠 + 白圆身 + 蓝眼 + 橙红笑嘴 + 红披风 + 左手冰淇淋权杖
+const SNOWKING_BODY = [
+  ".cc..g..g..g....",
+  "cccc.ggggggg....",
+  ".tt.#wwwwwwww#..",
+  "..t.#wwwwwwww#..",
+  "..g#wwwwwwwwww#.",
+  "..g#wwwwwwwwww#.",
+  "..g#wwbbwwbbww#.",
+  "..g#wwbbwwbbww#.",
+  "..g#wwwwooooww#.",
+  "..g#wwworrrrow#.",
+  "..g#wwwwooooww#.",
+  "..g#wwwwwwwwww#.",
+  "..g#wwwwwwwwww#.",
+  ".rr#wwwwwwwwww#.",
+  "rr.#wwwwwwww#...",
+  "....vv....vv...."
+];
+// 跑步第二帧：跨步
+const SNOWKING_RUNB = SNOWKING_BODY.slice();
+SNOWKING_RUNB[15] = "...vv......vv...";
+// 空中帧：收脚 + 披风微扬
+const SNOWKING_JUMP = SNOWKING_BODY.slice();
+SNOWKING_JUMP[14] = ".rr#wwwwwwww#...";
+SNOWKING_JUMP[15] = "................";
+const SNOWKING_SPR = { runA: SNOWKING_BODY, runB: SNOWKING_RUNB, jump: SNOWKING_JUMP };
+
+const SKINS = {
+  nailong: {
+    name: "奶龙", need: 0, spr: SPR, pal: NAILONG_PAL,
+    pc: ["#ffc93c", "#efa01e"],                                   // 死亡碎片颜色
+    blink: { fill: "#ffc93c", line: "#6e3a12", r: [0, -24, 10, 6], l: [1, -22, 8, 1] },
+    dead: { col: "#6e3a12",
+            x: [[0,-26],[2,-24],[4,-22],[6,-20],[8,-18],[8,-26],[6,-24],[4,-22],[2,-20],[0,-18]],
+            mouth: { r: [2, -17, 10, 5], inner: [4, -15, 6, 3] } }
+  },
+  snowking: {
+    name: "雪王", need: 6000, spr: SNOWKING_SPR, pal: SNOWKING_PAL,
+    pc: ["#ffffff", "#c9d8ea"],
+    blink: { fill: "#ffffff", line: "#5a6b80", r: [12, -20, 10, 4], l: [13, -18, 8, 1] },
+    dead: { col: "#1a1a1a",
+            x: [[12,-20],[14,-18],[14,-20],[12,-18],[20,-20],[22,-18],[22,-20],[20,-18]],
+            mouth: null }                                          // 雪王本来就是张嘴笑
+  }
+};
+let skin = localStorage.getItem("nailong_skin") || "nailong";
+if (!SKINS[skin]) skin = "nailong";
+// 形象面板卡片点击区
+const SKIN_CARD = {
+  nailong:  { x: 50,  y: 54, w: 180, h: 118 },
+  snowking: { x: 250, y: 54, w: 180, h: 118 }
+};
+
+function drawSprite(map, ox, oy, scale = 2, pal = NAILONG_PAL) {
   for (let r = 0; r < map.length; r++) {
     const row = map[r];
     for (let c = 0; c < row.length; c++) {
-      const col = NAILONG_PAL[row[c]];
+      const col = pal[row[c]];
       if (col) { ctx.fillStyle = col; ctx.fillRect(ox + c * scale, oy + r * scale, scale, scale); }
     }
   }
@@ -772,8 +842,9 @@ function drawSprite(map, ox, oy, scale = 2) {
 
 /* 以脚底中心 (player.x+10, player.y+28) 为锚点绘制，方便做挤压拉伸与倒地旋转 */
 function drawNailong() {
+  const SK = SKINS[skin];                        // 当前形象
   const airborne = state === STATE.PLAY && !player.grounded && !player.dead;
-  let map = player.runFrame ? SPR.runB : SPR.runA;
+  let map = player.runFrame ? SK.spr.runB : SK.spr.runA;
   let sx = 1, sy = 1, bob = 0, angle = 0;
   const now = performance.now();
 
@@ -784,11 +855,11 @@ function drawNailong() {
     sy = 1 + br * 0.025; sx = 1 - br * 0.02;
   } else if (player.dead) {
     // 撞晕：X 眼、张嘴、向前栽倒
-    map = SPR.runA;
+    map = SK.spr.runA;
     const t = Math.min(1, overTimer / 0.28);
     angle = (1 - Math.pow(1 - t, 2)) * Math.PI * 0.46;
   } else if (airborne) {
-    map = SPR.jump;
+    map = SK.spr.jump;
     if (player.vy < -350) { sy = 1.09; sx = 0.93; }       // 起跳拉伸
     else if (player.vy > 220) { sy = 0.95; sx = 1.05; }    // 下落压一点
   } else if (player.squash > 0) {
@@ -821,20 +892,21 @@ function drawNailong() {
   ctx.translate(ax, ay);
   if (angle) ctx.rotate(angle);
   ctx.scale(sx, sy);
-  drawSprite(map, -16, -32);
+  drawSprite(map, -16, -32, 2, SK.pal);
 
-  // 眨眼：黄块盖住绿色大眼睛，留一条深棕闭眼线（眼睛在锚点 x:0..10, y:-26..-16）
+  // 眨眼：色块盖住眼睛，留一条闭眼线（坐标随形象不同）
   if (!player.dead && player.blink > 0) {
-    ctx.fillStyle = NAILONG_PAL.y; ctx.fillRect(0, -24, 10, 6);
-    ctx.fillStyle = NAILONG_PAL.m; ctx.fillRect(1, -22, 8, 1);
+    ctx.fillStyle = SK.blink.fill; ctx.fillRect(...SK.blink.r);
+    ctx.fillStyle = SK.blink.line; ctx.fillRect(...SK.blink.l);
   }
-  // 撞晕表情：X 眼 + 张嘴
+  // 撞晕表情：X 眼（+ 张嘴，雪王天生张嘴笑则免）
   if (player.dead) {
-    ctx.fillStyle = NAILONG_PAL.m;
-    [[0,-26],[2,-24],[4,-22],[6,-20],[8,-18], [8,-26],[6,-24],[4,-22],[2,-20],[0,-18]]
-      .forEach(q => ctx.fillRect(q[0], q[1], 2, 2));
-    ctx.fillStyle = NAILONG_PAL.m; ctx.fillRect(2, -17, 10, 5);
-    ctx.fillStyle = "#d96b4a";     ctx.fillRect(4, -15, 6, 3);
+    ctx.fillStyle = SK.dead.col;
+    SK.dead.x.forEach(q => ctx.fillRect(q[0], q[1], 2, 2));
+    if (SK.dead.mouth) {
+      ctx.fillRect(...SK.dead.mouth.r);
+      ctx.fillStyle = "#d96b4a"; ctx.fillRect(...SK.dead.mouth.inner);
+    }
   }
   ctx.restore();
 }
@@ -1037,16 +1109,19 @@ const buttons = IS_TOUCH ? {
   home:   { x: 252, y: 184, w: 150, h: 44, label: "返回首页" },
   normal: { x: 78,  y: 126, w: 150, h: 46, label: "普通模式" },
   hard:   { x: 252, y: 126, w: 150, h: 46, label: "进阶模式" },
-  info:   { x: 165, y: 180, w: 150, h: 40, label: "详情" }
+  skins:  { x: 80,  y: 180, w: 150, h: 40, label: "分数奖励" },
+  info:   { x: 250, y: 180, w: 150, h: 40, label: "详情" }
 } : {
   retry:  { x: 96,  y: 194, w: 132, h: 34, label: "再来一次" },
   home:   { x: 252, y: 194, w: 132, h: 34, label: "返回首页" },
   normal: { x: 108, y: 132, w: 120, h: 36, label: "普通模式" },
   hard:   { x: 252, y: 132, w: 120, h: 36, label: "进阶模式" },
-  info:   { x: 180, y: 178, w: 120, h: 30, label: "详情" }
+  skins:  { x: 110, y: 178, w: 120, h: 30, label: "分数奖励" },
+  info:   { x: 250, y: 178, w: 120, h: 30, label: "详情" }
 };
 let hoverBtn = null;
-let showInfo = false;   // 详情面板是否展开
+let showInfo = false;    // 详情面板是否展开
+let showSkins = false;   // 分数奖励（形象）面板是否展开
 
 function drawButton(b, hover) {
   const c = hover ? "#ffe278" : C.btn;
@@ -1244,16 +1319,20 @@ function render() {
     px(W / 2 - 132, ty + 14, 8, 8, "#ff9aa9");
     px(W / 2 + 124, ty + 14, 8, 8, "#ff9aa9");
 
-    // 模式选择按钮 + 详情按钮
+    // 模式选择按钮 + 分数奖励 + 详情
     drawButton(buttons.normal, hoverBtn === "normal");
     drawButton(buttons.hard, hoverBtn === "hard");
+    drawButton(buttons.skins, hoverBtn === "skins");
     drawButton(buttons.info, hoverBtn === "info");
 
     if (!IS_TOUCH && Math.floor(performance.now() / 500) % 2 === 0) {
       pixelText("空格键 = 普通模式快速开始", W / 2, 216, 11, "#ffffff", "center");
     }
     pixelText(IS_TOUCH ? "点击屏幕 = 跳跃（可三段跳，越跳越高）" : "点击鼠标 / 空格 = 跳跃（可三段跳，越跳越高）", W / 2, 246, 11, "#27503a", "center", false);
-    if (best > 0) pixelText("最高分 " + best, W / 2, 234, 12, "#ffe873", "center");
+    if (best > 0 || bestHard > 0) {
+      const s = bestHard > 0 ? "最高分 " + best + "  ·  进阶最高 " + bestHard : "最高分 " + best;
+      pixelText(s, W / 2, 234, 12, "#ffe873", "center");
+    }
   }
 
   /* ---------- 详情面板（首页点“详情”弹出，介绍两种模式与基本玩法） ---------- */
@@ -1287,10 +1366,57 @@ function render() {
     line("· 子弹命中飞鸟可获得更高分");
     line("· 达成目标分数触发「奶龙时刻」");
     line("  短时间内无敌、超高速、无限弹药");
+    line("· 冲高分可解锁新形象（首页-分数奖励）");
 
     // 关闭提示（闪烁）
     if (Math.floor(performance.now() / 400) % 2 === 0) {
       pixelText("点击任意处返回", W / 2, iy + ih - 14, 11, "#ff9aa9", "center", false);
+    }
+  }
+
+  /* ---------- 分数奖励面板（形象解锁与选择） ---------- */
+  if (state === STATE.MENU && showSkins) {
+    ctx.fillStyle = "rgba(10,6,28,.78)";
+    ctx.fillRect(0, 0, W, H);
+
+    const ix = 30, iy = 14, iw = W - 60, ih = H - 36;
+    px(ix, iy, iw, ih, C.panel);
+    px(ix, iy, iw, 3, C.panelE);
+    px(ix, iy + ih - 3, iw, 3, C.panelE);
+    px(ix, iy, 3, ih, C.panelE);
+    px(ix + iw - 3, iy, 3, ih, C.panelE);
+
+    pixelText("分数奖励 · 形象", W / 2, iy + 10, 20, "#ffd23f", "center", false);
+    pixelText("进阶模式最高分达到 6000，解锁神秘新形象", W / 2, iy + 30, 11, "#9fd8ff", "center");
+
+    for (const id of ["nailong", "snowking"]) {
+      const sk = SKINS[id], b = SKIN_CARD[id];
+      const sel = skin === id, unl = bestHard >= sk.need;
+      // 卡片底 + 选中金边
+      px(b.x, b.y + 3, b.w, b.h, "#1b1436");
+      px(b.x, b.y, b.w, b.h, sel ? "#3a2f14" : "#2e2358");
+      if (sel) {
+        px(b.x, b.y, b.w, 3, "#ffd23f"); px(b.x, b.y + b.h - 3, b.w, 3, "#ffd23f");
+        px(b.x, b.y, 3, b.h, "#ffd23f"); px(b.x + b.w - 3, b.y, 3, b.h, "#ffd23f");
+      }
+      // 形象预览（3 倍放大；未解锁半透明剪影）
+      ctx.globalAlpha = unl ? 1 : 0.25;
+      drawSprite(sk.spr.runA, b.x + b.w / 2 - 24, b.y + 6, 3, sk.pal);
+      ctx.globalAlpha = 1;
+      pixelText(sk.name, b.x + b.w / 2, b.y + 60, 15, sel ? "#ffe873" : "#e8e2ff", "center", false);
+      if (unl) {
+        pixelText(sel ? "✓ 使用中" : "点击使用", b.x + b.w / 2, b.y + 82, 11, sel ? "#ffe873" : "#9fd8ff", "center");
+      } else {
+        pixelText("🔒 未解锁", b.x + b.w / 2, b.y + 78, 11, "#ff9aa9", "center");
+        pixelText("进阶最高 " + bestHard + " / " + sk.need, b.x + b.w / 2, b.y + 92, 10, "#cfc6f2", "center");
+        const pw2 = b.w - 40, pr = Math.min(1, bestHard / sk.need);
+        px(b.x + 20, b.y + 104, pw2, 5, "#1b1436");
+        px(b.x + 20, b.y + 104, Math.round(pw2 * pr), 5, "#ffd23f");
+      }
+    }
+
+    if (Math.floor(performance.now() / 400) % 2 === 0) {
+      pixelText("点击卡片使用形象 · 点击空白处返回", W / 2, iy + ih - 14, 11, "#ff9aa9", "center", false);
     }
   }
 
@@ -1312,9 +1438,15 @@ function render() {
     pixelText("最高分数", W / 2 + 70, py0 + 56, 14, "#cfc6f2", "center");
     pixelText(String(best), W / 2 + 70, py0 + 76, 30, "#ffe873", "center");
 
-    if (finalScore >= best && finalScore > 0) {
+    if (gameMode === "hard" && bestHard > 0) {
+      pixelText("进阶最高 " + bestHard, W / 2, py0 + 108, 12, "#9fd8ff", "center");
+    }
+    if (newUnlock) {
       if (Math.floor(performance.now() / 350) % 2 === 0)
-        pixelText("★ 新纪录 ★", W / 2, py0 + 118, 13, "#ff9aa9", "center");
+        pixelText("🎉 达成 6000 分，解锁新形象：雪王！", W / 2, py0 + 124, 13, "#ffe873", "center");
+    } else if (finalScore >= best && finalScore > 0) {
+      if (Math.floor(performance.now() / 350) % 2 === 0)
+        pixelText("★ 新纪录 ★", W / 2, py0 + 124, 13, "#ff9aa9", "center");
     }
 
     drawButton(buttons.retry, hoverBtn === "retry");
@@ -1360,9 +1492,28 @@ const FIRE_RECT = IS_TOUCH
 function pressAt(p) {
   ensureAudio();
   if (state === STATE.MENU) {
-    if (showInfo) { showInfo = false; return; }
+    if (showInfo || showSkins) {
+      // 形象面板：点卡片即换装（面板保持打开），点空白处关闭
+      if (showSkins) {
+        let onCard = false;
+        for (const id of ["nailong", "snowking"]) {
+          if (hit(p, SKIN_CARD[id])) {
+            onCard = true;
+            if (bestHard >= SKINS[id].need && skin !== id) {
+              sfxClick();
+              skin = id;
+              localStorage.setItem("nailong_skin", id);
+            }
+          }
+        }
+        if (onCard) return;
+      }
+      showInfo = false; showSkins = false;
+      return;
+    }
     if (hit(p, buttons.normal)) { sfxClick(); startGame("normal"); }
     else if (hit(p, buttons.hard)) { sfxClick(); startGame("hard"); }
+    else if (hit(p, buttons.skins)) { sfxClick(); showSkins = true; }
     else if (hit(p, buttons.info)) { sfxClick(); showInfo = true; }
     return;
   }
@@ -1417,8 +1568,9 @@ canvas.addEventListener("mousemove", e => {
   if (state === STATE.OVER) {
     hoverBtn = hit(p, buttons.retry) ? "retry" : hit(p, buttons.home) ? "home" : null;
   } else if (state === STATE.MENU) {
-    hoverBtn = showInfo ? null :
-      hit(p, buttons.normal) ? "normal" : hit(p, buttons.hard) ? "hard" : hit(p, buttons.info) ? "info" : null;
+    hoverBtn = (showInfo || showSkins) ? null :
+      hit(p, buttons.normal) ? "normal" : hit(p, buttons.hard) ? "hard" :
+      hit(p, buttons.skins) ? "skins" : hit(p, buttons.info) ? "info" : null;
   } else {
     hoverBtn = null;
   }
