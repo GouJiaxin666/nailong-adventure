@@ -739,10 +739,20 @@ function drawNailong() {
   const ax = Math.round(player.x + 10);
   const ay = Math.round(player.y + 28 + bob);
 
-  // 奶龙时刻：金色呼吸光环
+  // 奶龙时刻：金色呼吸大光环 + 旋转光芒
   if (fever > 0) {
-    ctx.fillStyle = "rgba(255,210,63,.28)";
-    ctx.beginPath(); ctx.arc(ax, ay - 14, 23 + Math.sin(now / 90) * 3, 0, 7); ctx.fill();
+    ctx.fillStyle = "rgba(255,210,63,.32)";
+    ctx.beginPath(); ctx.arc(ax, ay - 14, 27 + Math.sin(now / 80) * 4, 0, 7); ctx.fill();
+    ctx.strokeStyle = "rgba(255,220,90,.8)";
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 6; i++) {
+      const a = now / 240 + i * Math.PI / 3;
+      const r0 = 31, r1 = 40 + Math.sin(now / 70 + i) * 5;
+      ctx.beginPath();
+      ctx.moveTo(ax + Math.cos(a) * r0, ay - 14 + Math.sin(a) * r0);
+      ctx.lineTo(ax + Math.cos(a) * r1, ay - 14 + Math.sin(a) * r1);
+      ctx.stroke();
+    }
   }
 
   ctx.save();
@@ -1009,10 +1019,32 @@ function render() {
     drawCactus(sx < -40 ? sx + 700 : sx, 24);
   }
 
+  // 奶龙时刻：全屏金色速度线（横向疾驰条）
+  if (state === STATE.PLAY && fever > 0) {
+    for (let i = 0; i < 6; i++) {
+      const ly = Math.floor(Math.random() * (GROUND_Y - 20)) + 10;
+      const lx = Math.floor(Math.random() * W);
+      const len = 34 + Math.random() * 46;
+      px(lx, ly, len, 2, i % 2 ? "rgba(255,236,150,.5)" : "rgba(255,255,255,.42)");
+    }
+  }
+
   // 奶龙
   drawNailong();
 
   drawParticles();
+
+  // 奶龙时刻触发瞬间：中央大字弹屏（1.2 秒，弹性放大）
+  if (state === STATE.PLAY && fever > FEVER_TIME - 1.2) {
+    const k = (FEVER_TIME - fever) / 1.2;              // 0 → 1
+    const size = Math.round(34 + 10 * (1 - k) * (1 - k));  // 44 → 34 弹入
+    const col = k > 0.5 ? "#ffd23f" : "#fff3c0";
+    for (const [ox, oy] of [[-3,0],[3,0],[0,-3],[0,3],[-2,-2],[2,2]]) {
+      pixelText("奶龙时刻！！", W / 2 + ox, 118 + oy, size, "#7a4a00", "center");
+    }
+    pixelText("奶龙时刻！！", W / 2, 118, size, col, "center");
+    pixelText("无敌 · 无限弹药 · 超高速", W / 2, 118 + size + 12, 12, "#ffe873", "center");
+  }
 
   /* ---------- HUD ---------- */
   if (state === STATE.PLAY || state === STATE.OVER) {
@@ -1025,10 +1057,16 @@ function render() {
     // 进阶模式：弹药储存指示（最多 3 枚）+ 发射提示 / 奶龙时刻倒计时
     if (gameMode === "hard") {
       if (fever > 0) {
-        // 奶龙时刻倒计时（顶部居中，闪烁提示）
+        // 奶龙时刻倒计时（顶部居中大号字 + 深色描边，闪烁提示）
         const shine = Math.sin(performance.now() / 80) > 0;
-        pixelText("奶龙时刻！", W / 2, 26, 13, shine ? "#ffd23f" : "#fff3c0", "center");
-        pixelText(Math.ceil(fever) + "s", W / 2, 42, 14, shine ? "#ff9aa9" : "#ff8a8a", "center");
+        const main = shine ? "#ffd23f" : "#fff3c0";
+        const sec = shine ? "#ff9aa9" : "#ff8a8a";
+        for (const [ox, oy] of [[-2,0],[2,0],[0,-2],[0,2]]) {
+          pixelText("奶龙时刻！", W / 2 + ox, 34 + oy, 22, "#7a4a00", "center");
+          pixelText(Math.ceil(fever) + "s", W / 2 + ox, 58 + oy, 16, "#6b1010", "center");
+        }
+        pixelText("奶龙时刻！", W / 2, 34, 22, main, "center");
+        pixelText(Math.ceil(fever) + "s", W / 2, 58, 16, sec, "center");
       } else {
         for (let i = 0; i < 3; i++) {
           const ax = 12 + i * 12, ay = 44;
