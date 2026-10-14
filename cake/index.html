@@ -56,8 +56,13 @@ const W = 960, H = 540;
 /* ================= 物理常量 ================= */
 const GRAVITY = 2200;
 const MOVE_SPEED = 270;
+const AIR_MOVE_SPEED = MOVE_SPEED * 0.7;   // 跳跃（空中）横向速度：比地面低 30%，落点更好控制
 const JUMP_V = -690;          // 跳跃高度 ≈ 108px（约为原高度一半），台阶纵向间距按 85px 设计留足余量
+const AIR_JUMP_V = -740;      // 二段跳上升速度（≈124px，比地面跳略高，容错更宽）
 const FALL_LIMIT = 640;       // 掉出屏幕底部 → 重生
+/* ---- 机关参数 ---- */
+const FRAG_BREAK_T  = 1;      // 易碎平台：站上去 1 秒后碎裂
+const FRAG_REPAIR_T = 4;      // 易碎平台：碎裂 4 秒后修复
 
 /* ================= 调色板 ================= */
 const C = {
@@ -148,7 +153,10 @@ function pixelText(str, x, y, size, color, align = "left", shadow = true) {
    solids  ：四周实心（可顶头、不可穿越）
    oneways ：单向平台（从下往上可穿过，下落时站上）
    movers  ：移动平台（单向平台属性），到终点停 pause 秒后折返
-   hazards ：危险物（碰到即重生，第一关暂无） */
+   frags   ：易碎平台（站上去 1 秒碎裂、4 秒后修复）
+   orbs    ：跳跃能量（空中拾取后可用一次二段跳，落地重置）
+   pit     ：深坑区域（仅用于绘制深渊阴影）
+   hazards ：危险物（碰到即重生） */
 const LEVELS = [
   {
     name: "奶油的醇厚",
@@ -175,11 +183,47 @@ const LEVELS = [
       { x: 312, w: 112, yLow: 470, yHigh: 153, speed: 80, pause: 2 }
     ],
     hazards: []
+  },
+  {
+    name: "烘焙的精髓",
+    spawn: { x: 90, y: 470 },
+    cake:  { x: 515, y: 153 },   // 蛋糕放在高处的饼干台上
+    home:  { x: 875, y: 153 },   // 家在最右上方
+    pit:   { x: 255, w: 450 },   // 中央深坑（掉下去回出生点）
+    solids: [
+      { x: 0,   y: 470, w: 255, h: 70, kind: "ground" },   // 左下地面（出生）
+      { x: 705, y: 470, w: 255, h: 70, kind: "ground" },   // 右下地面
+      { x: -20, y: -60, w: 1000, h: 60, kind: "stone" },   // 顶棚
+      { x: -20, y: 0,   w: 20,  h: 700, kind: "stone" },   // 左墙
+      { x: 960, y: 0,   w: 20,  h: 700, kind: "stone" }    // 右墙
+    ],
+    oneways: [
+      { x: 800, y: 300, w: 160, h: 16, kind: "float" },    // 上层平台（必须用跳跃能量二段跳上来）
+      { x: 430, y: 153, w: 170, h: 16, kind: "float" },    // 蛋糕台
+      { x: 790, y: 153, w: 170, h: 16, kind: "float" }     // 家平台
+    ],
+    frags: [
+      // 上行：上层平台 → 蛋糕台（踩过一次 1 秒后碎裂）
+      { x: 620, y: 215, w: 170, h: 16 },
+      // 回家：蛋糕台 → 家平台
+      { x: 660, y: 153, w: 120, h: 16 }
+    ],
+    orbs: [
+      { x: 880, y: 390 }                                   // 跳跃能量（在右下地面上方，跳起拾取）
+    ],
+    movers: [
+      // 中央深坑上方四块「既上下往返、又易碎」的曲奇平台，相位错开，需要看准时机起跳
+      { x: 275, w: 84, yLow: 470, yHigh: 392, speed: 70, pause: 2, initPause: 0,   fragile: true },
+      { x: 390, w: 84, yLow: 470, yHigh: 392, speed: 70, pause: 2, initPause: 1.6, fragile: true },
+      { x: 505, w: 84, yLow: 470, yHigh: 392, speed: 70, pause: 2, initPause: 3.2, fragile: true },
+      { x: 620, w: 84, yLow: 470, yHigh: 392, speed: 70, pause: 2, initPause: 4.8, fragile: true }
+    ],
+    hazards: []
   }
 ];
 
 /* ================= 状态 ================= */
-const ST = { MENU: 0, PLAY: 1, WIN: 2 };
+const ST = { MENU: 0, PLAY: 1, WIN: 2, SELECT: 3 };
 let state = ST.MENU;
 let levelIdx = 0;
 let LV = null;                 // 当前关数据（含运行时的 mover 状态）
@@ -196,6 +240,7 @@ const player = {
   grounded: false, stand: null,   // stand = 脚下的平台（移动平台携带用）
   face: 1, runT: 0, airT: 0,
   coyote: 0, jbuf: 0,
+  airJump: 0,                      // 跳跃能量：拾取后可用一次空中跳跃
   respawnT: 0
 };
 
@@ -223,24 +268,45 @@ function beep(f0, f1, dur, vol = 0.06, type = "square") {
 }
 const sfxJump = () => beep(300, 620, 0.12);
 const sfxEat  = () => { beep(660, 990, 0.1, 0.07); beep(990, 1320, 0.14, 0.06); };
-const sfxWin  = () => { beep(523, 784, 0.14, 0.07); setTimeout(() => beep(659, 988, 0.14, 0.07), 120); setTimeout(() => beep(784, 1318, 0.24, 0.07), 240); };
 const sfxFall = () => beep(360, 80, 0.3, 0.07, "sawtooth");
 const sfxClick = () => beep(660, 880, 0.07, 0.05);
+const sfxFrag = () => beep(430, 90, 0.18, 0.07, "triangle");
+const sfxOrb  = () => { beep(880, 1320, 0.1, 0.06); beep(1320, 1760, 0.12, 0.05); };
+
+/* ---- 回家音效：奶龙大笑（复用跑酷的语音资源） ---- */
+const laughAudio = new Audio(encodeURI("../damaoxian/纯音乐 - 奶龙大笑.mp3"));
+laughAudio.preload = "auto";
+function playLaugh() {
+  try {
+    laughAudio.pause(); laughAudio.currentTime = 0; laughAudio.volume = 0.9;
+    laughAudio.play().catch(() => {});
+  } catch (e) {}
+}
 
 /* ================= 关卡装载 ================= */
 function loadLevel(i) {
   levelIdx = i;
   const src = LEVELS[i];
   LV = {
-    name: src.name, spawn: src.spawn, cake: src.cake, home: src.home,
+    name: src.name, spawn: src.spawn, cake: src.cake, home: src.home, pit: src.pit || null,
     solids: src.solids, oneways: src.oneways, hazards: src.hazards,
-    movers: src.movers.map(m => ({ ...m, y: m.yLow, dir: -1, pauseT: m.pause, dy: 0 }))  // 开局先在起点停 2 秒
+    movers: (src.movers || []).map(m => ({
+      ...m,
+      y: m.initY !== undefined ? m.initY : m.yLow,
+      dir: m.initDir !== undefined ? m.initDir : -1,
+      pauseT: m.initPause !== undefined ? m.initPause : m.pause,   // 可用 initPause 错开相位
+      broken: false, armed: false, t: 0, rt: 0,                    // 易碎移动平台的碎裂状态
+      dy: 0
+    })),
+    frags: (src.frags || []).map(f => ({ ...f, t: 0, rt: 0, broken: false, armed: false })),   // 易碎平台运行时状态
+    orbs:  (src.orbs  || []).map(o => ({ ...o, taken: false }))                  // 跳跃能量运行时状态
   };
   cakeEaten = false;
   particles = [];
   toast = ""; toastT = 0;
-  hintT = i === 0 ? 8 : 4.5;   // 第一关新手教程面板多展示一会
+  hintT = (i === 0 || i === 1) ? 8 : 4.5;   // 前两关有教程面板，多展示一会
   winT = 0;
+  try { laughAudio.pause(); laughAudio.currentTime = 0; } catch (e) {}
   respawnPlayer(true);
 }
 function respawnPlayer(fresh) {
@@ -248,7 +314,8 @@ function respawnPlayer(fresh) {
   player.y = LV.spawn.y - player.h;
   player.vx = 0; player.vy = 0;
   player.grounded = true; player.stand = null;
-  player.coyote = 0; player.jbuf = 0;
+  player.coyote = 0; player.jbuf = 0; player.airJump = 0;
+  for (const o of LV.orbs) o.taken = false;      // 重生时能量球恢复可用
   player.respawnT = fresh ? 0 : 0.6;
 }
 function startLevel(i) { ensureAudio(); loadLevel(i); state = ST.PLAY; }
@@ -266,6 +333,9 @@ addEventListener("keydown", e => {
     if (e.code === "Escape") { state = ST.MENU; }
   } else if (state === ST.MENU) {
     if (["Space", "Enter"].includes(e.code)) { sfxClick(); startLevel(Math.min(progress, LEVELS.length) - 1); }
+    if (e.code === "Escape") { sfxClick(); state = ST.SELECT; }   // 进选关界面
+  } else if (state === ST.SELECT) {
+    if (e.code === "Escape") { sfxClick(); state = ST.MENU; }
   } else if (state === ST.WIN && winT > 0.4) {
     if (["Space", "Enter"].includes(e.code)) {
       sfxClick();
@@ -279,13 +349,22 @@ addEventListener("keyup", e => { keys[e.code] = false; });
 /* ---- 触屏：左半屏虚拟摇杆 + 右半屏跳跃 ---- */
 const IS_TOUCH = "ontouchstart" in window || navigator.maxTouchPoints > 0;
 const joy = { active: false, id: null, ax: 0, ay: 0, dx: 0, dy: 0, x: 0, y: 0 };   // ax/ay 锚点 dx/dy 偏移
-const joyR = 46;
+const joyR = IS_TOUCH ? 62 : 46;                    // 触屏放大摇杆半径，手指更好推
 let jumpBtnHold = false;
-const JUMP_BTN = { x: W - 84, y: H - 92, r: 52 };
+const JUMP_BTN = IS_TOUCH ? { x: W - 96, y: H - 106, r: 66 } : { x: W - 84, y: H - 92, r: 52 };
+const JOY_IDLE = IS_TOUCH ? { x: 100, y: H - 110 } : { x: 86, y: H - 92 };   // 未按下时的摇杆提示位置
 
 function canvasPos(t) {
   const r = canvas.getBoundingClientRect();
-  return { x: (t.clientX - r.left) * W / r.width, y: (t.clientY - r.top) * H / r.height };
+  const cx = t.clientX, cy = t.clientY;
+  if (wrapRotated) {
+    // 竖屏下 #wrap 被 JS 旋转 90°：屏幕 x/y 与画布坐标互换
+    return {
+      x: W / 2 + (cy - (r.top + r.height / 2)) * W / r.height,
+      y: H / 2 - (cx - (r.left + r.width / 2)) * H / r.width
+    };
+  }
+  return { x: (cx - r.left) * W / r.width, y: (cy - r.top) * H / r.height };
 }
 canvas.addEventListener("touchstart", e => {
   e.preventDefault();
@@ -332,44 +411,69 @@ canvas.addEventListener("mousedown", e => {
   ensureAudio();
   if (state !== ST.PLAY) tapAt(canvasPos(e));
 });
-const HUB_BTN = { x: 12, y: 12, w: 88, h: 26, label: "← 游戏大厅" };
+const HUB_BTN = IS_TOUCH ? { x: 14, y: 14, w: 112, h: 36, label: "← 游戏大厅" }
+                         : { x: 12, y: 12, w: 88,  h: 26, label: "← 游戏大厅" };
 function hitR(p, b) { return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h; }
 function tapAt(p) {
   if (state === ST.MENU) {
-    // 关卡按钮
-    for (const lb of levelButtons()) {
-      if (hitR(p, lb)) {
-        if (lb.unlocked) { sfxClick(); startLevel(lb.idx); }
-        else sfxFall();
-        return;
-      }
+    if (hitR(p, BTN_START)) { sfxClick(); startLevel(Math.min(progress, LEVELS.length) - 1); }
+    else if (hitR(p, BTN_SELECT)) { sfxClick(); state = ST.SELECT; }
+    else if (hitR(p, HUB_BTN)) location.href = "../index.html";
+  } else if (state === ST.SELECT) {
+    for (const lc of levelCards()) {
+      if (hitR(p, lc)) { sfxClick(); startLevel(lc.idx); return; }
     }
-    if (hitR(p, HUB_BTN)) location.href = "../index.html";
+    if (hitR(p, BTN_BACK)) { sfxClick(); state = ST.MENU; }
   } else if (state === ST.WIN && winT > 0.4) {
     if (hitR(p, BTN_NEXT) && levelIdx + 1 < LEVELS.length) { sfxClick(); startLevel(levelIdx + 1); }
     else if (hitR(p, BTN_AGAIN)) { sfxClick(); startLevel(levelIdx); }
     else if (hitR(p, BTN_HUB2)) location.href = "../index.html";
   }
 }
-function levelButtons() {
+/* ---- 选关界面：关卡卡片（两列网格，关卡变多也能自动排布） ---- */
+function levelCards() {
   const out = [];
   const n = LEVELS.length;
-  const bw = 300, bh = 44, x0 = (W - bw) / 2;
+  const cols = 2, cw = 300, ch = 96, gx = 34, gy = 22;
+  const x0 = (W - (cols * cw + (cols - 1) * gx)) / 2, y0 = 150;
+  // 当前关数据里出现过的机关种类，作为卡片标签
+  function tagsOf(L) {
+    const t = [];
+    if (L.movers && L.movers.length) t.push("移动平台");
+    if (L.frags && L.frags.length) t.push("易碎平台");
+    if (L.orbs && L.orbs.length) t.push("跳跃能量");
+    if (L.pit) t.push("深渊");
+    return t.slice(0, 3);
+  }
   for (let i = 0; i < n; i++) {
-    out.push({ x: x0, y: 240 + i * (bh + 14), w: bw, h: bh, idx: i,
-               unlocked: i < progress, label: LEVELS[i].name });
+    const r = Math.floor(i / cols), c = i % cols;
+    out.push({
+      x: x0 + c * (cw + gx), y: y0 + r * (ch + gy), w: cw, h: ch,
+      idx: i, cleared: i < progress - 1, label: LEVELS[i].name, tags: tagsOf(LEVELS[i])
+    });
   }
   return out;
 }
-const BTN_NEXT  = { x: W / 2 - 250, y: 372, w: 150, h: 46 };
-const BTN_AGAIN = { x: W / 2 - 75,  y: 372, w: 150, h: 46 };
-const BTN_HUB2  = { x: W / 2 + 100, y: 372, w: 150, h: 46 };
+/* 触屏下按钮整体放大，保证手指点得准（画布会被缩放到屏幕，逻辑尺寸需相应加大） */
+const BTN_START  = IS_TOUCH ? { x: W / 2 - 212, y: 246, w: 200, h: 62, label: "开始游戏" }
+                            : { x: W / 2 - 176, y: 252, w: 164, h: 50, label: "开始游戏" };
+const BTN_SELECT = IS_TOUCH ? { x: W / 2 + 12,  y: 246, w: 200, h: 62, label: "选关" }
+                            : { x: W / 2 + 12,  y: 252, w: 164, h: 50, label: "选关" };
+const BTN_BACK   = IS_TOUCH ? { x: 14, y: 14, w: 112, h: 36, label: "← 返回" }
+                            : { x: 12, y: 12, w: 88,  h: 26, label: "← 返回" };
+const BTN_NEXT  = IS_TOUCH ? { x: 170, y: 364, w: 194, h: 58 } : { x: W / 2 - 250, y: 372, w: 150, h: 46 };
+const BTN_AGAIN = IS_TOUCH ? { x: 383, y: 364, w: 194, h: 58 } : { x: W / 2 - 75,  y: 372, w: 150, h: 46 };
+const BTN_HUB2  = IS_TOUCH ? { x: 596, y: 364, w: 194, h: 58 } : { x: W / 2 + 100, y: 372, w: 150, h: 46 };
 
 /* ================= 移动平台 ================= */
 function updateMovers(dt) {
   for (const m of LV.movers) {
     const prevY = m.y;
     m.py = m.y;                             // 上一帧位置（搭裁判定用）
+    // 易碎计时（含碎裂后的修复倒计时）必须放在 broken 判断之前，
+    // 否则 continue 会跳过 tickFragile，碎裂的平台永远等不到修复
+    if (m.fragile && tickFragile(m, dt)) shatterFrag(m);
+    if (m.broken) { m.dy = 0; continue; }   // 碎裂中：停在原地（相位保留），修复后继续往返
     if (m.pauseT > 0) {
       m.pauseT -= dt;                       // 终点停留 2 秒
     } else {
@@ -378,6 +482,57 @@ function updateMovers(dt) {
       if (m.y >= m.yLow)  { m.y = m.yLow;  m.dir = -1; m.pauseT = m.pause; }
     }
     m.dy = m.y - prevY;                     // 本帧位移（携带玩家）
+  }
+}
+
+/* ========= 易碎平台（可单独存在，也可挂在移动平台上） ========= */
+/* 踩过一次就开始倒计时（不需要一直站在上面），1 秒后碎裂，4 秒后修复；返回 true 表示本帧刚碎 */
+function tickFragile(o, dt) {
+  if (o.broken) {
+    o.rt -= dt;
+    if (o.rt <= 0) { o.broken = false; o.rt = 0; o.t = 0; o.armed = false; }   // 4 秒后修复
+    return false;
+  }
+  if (!o.armed && player.stand === o) o.armed = true;
+  if (o.armed) {
+    o.t += dt;
+    if (o.t >= FRAG_BREAK_T) { o.broken = true; o.rt = FRAG_REPAIR_T; o.t = 0; return true; }
+  }
+  return false;
+}
+/* 碎裂瞬间：音效 + 碎块粒子 + 把还站在上面的玩家放下 */
+function shatterFrag(o) {
+  sfxFrag(); camShake = 0.4;
+  if (player.stand === o) { player.stand = null; player.grounded = false; }
+  for (let i = 0; i < 14; i++) {
+    particles.push({
+      x: o.x + Math.random() * o.w, y: o.y + 8,
+      vx: (Math.random() - 0.5) * 90, vy: 40 + Math.random() * 120,
+      life: 0.6 + Math.random() * 0.5, color: ["#cf9550", "#e0ac6a", "#a9693a"][i % 3], size: 3 + Math.random() * 4
+    });
+  }
+}
+function updateFrags(dt) {
+  for (const f of LV.frags) if (tickFragile(f, dt)) shatterFrag(f);
+}
+
+/* ================= 跳跃能量 ================= */
+function updateOrbs(dt) {
+  for (const o of LV.orbs) {
+    if (o.taken) continue;                        // 已被拾取：等玩家落地后自动恢复
+    if (aabb(player, { x: o.x - 11, y: o.y - 11, w: 22, h: 22 })) {
+      o.taken = true;
+      player.airJump = 1;                         // 获得一次空中跳
+      sfxOrb();
+      showToast("获得跳跃能量！空中再按一次跳跃可二段跳", 1.8);
+      for (let i = 0; i < 16; i++) {
+        particles.push({
+          x: o.x + (Math.random() - 0.5) * 20, y: o.y + (Math.random() - 0.5) * 20,
+          vx: (Math.random() - 0.5) * 220, vy: (Math.random() - 0.5) * 220,
+          life: 0.3 + Math.random() * 0.3, color: ["#ffd23f", "#fff6e8", "#9fd8ff"][i % 3], size: 3 + Math.random() * 3
+        });
+      }
+    }
   }
 }
 
@@ -400,7 +555,7 @@ function updatePlayer(dt) {
   if (player.stand && player.stand.dy) player.y += player.stand.dy;
 
   const ax = axisX();
-  player.vx = ax * MOVE_SPEED;
+  player.vx = ax * (player.grounded ? MOVE_SPEED : AIR_MOVE_SPEED);   // 空中横向速度降低 30%
   if (ax !== 0) { player.face = ax > 0 ? 1 : -1; player.runT += dt; }
 
   // 土狼时间 + 跳跃缓冲
@@ -410,6 +565,18 @@ function updatePlayer(dt) {
     player.vy = JUMP_V;
     player.grounded = false; player.stand = null; player.coyote = 0; player.jbuf = 0;
     sfxJump();
+  } else if (player.jbuf > 0 && player.airJump > 0 && !player.grounded) {
+    // 空中二段跳：消耗拾取到的跳跃能量（略高于地面跳，给足容错）
+    player.vy = AIR_JUMP_V;
+    player.airJump--; player.jbuf = 0; player.stand = null;
+    sfxOrb();
+    for (let i = 0; i < 14; i++) {
+      particles.push({
+        x: player.x + player.w / 2 + (Math.random() - 0.5) * 26, y: player.y + player.h - 6,
+        vx: (Math.random() - 0.5) * 180, vy: 30 + Math.random() * 90,
+        life: 0.35 + Math.random() * 0.3, color: ["#ffd23f", "#fff6e8", "#9fd8ff"][i % 3], size: 3 + Math.random() * 3
+      });
+    }
   }
 
   player.vy += GRAVITY * dt;
@@ -442,7 +609,7 @@ function updatePlayer(dt) {
   }
   // 单向平台：仅下落时判定；脚在平台顶之上（或上一帧正站在此平台上）则落上
   if (player.vy >= 0) {
-    const all = LV.oneways.concat(LV.movers);
+    const all = LV.oneways.concat(LV.movers.filter(m => !m.broken), LV.frags.filter(f => !f.broken));
     for (const p of all) {
       const topRef = p.py !== undefined ? Math.min(p.y, p.py) : p.y;
       if (player.x + player.w > p.x && player.x < p.x + p.w &&
@@ -486,7 +653,7 @@ function updatePlayer(dt) {
     if (player.x + player.w > hm.x - 26 && player.x < hm.x + 26 &&
         player.y + player.h > hm.y - 60 && player.y < hm.y) {
       state = ST.WIN; winT = 0;
-      sfxWin();
+      playLaugh();
       progress = Math.max(progress, Math.min(levelIdx + 2, LEVELS.length));
       localStorage.setItem("nailong_cake_progress", progress);
       for (let i = 0; i < 60; i++) {
@@ -513,11 +680,13 @@ function land(p) {
   player.vy = 0;
   player.grounded = true;
   player.stand = p;
+  player.airJump = 0;                            // 落到平台后跳跃能量清零
+  for (const o of LV.orbs) o.taken = false;      // 落地立即恢复跳跃能量球（无需等待充能）
 }
 function aabb(a, b) {
   return a.x + a.w > b.x && a.x < b.x + b.w && a.y + a.h > b.y && a.y < b.y + b.h;
 }
-function showToast(s) { toast = s; toastT = 2.4; }
+function showToast(s, d = 2.4) { toast = s; toastT = d; }
 
 /* ================= 主循环 ================= */
 let last = performance.now();
@@ -541,7 +710,9 @@ function update(dt) {
   particles = particles.filter(p => p.life > 0);
   if (state === ST.PLAY) {
     updateMovers(dt);
+    updateFrags(dt);
     updatePlayer(dt);
+    updateOrbs(dt);
   } else if (state === ST.WIN) {
     winT += dt;
   }
@@ -578,10 +749,17 @@ function drawSolid(s) {
   }
   // 地面/石块：泥土 + 草皮
   px(s.x, s.y, s.w, s.h, C.dirt);
-  for (let dx = 0; dx < s.w; dx += 34) px(s.x + dx + 8, s.y + 22, 16, 6, C.dirtD);
+  // 装饰条纹一律按平台右边界截断，避免超出平台范围画到相邻区域
+  for (let dx = 0; dx < s.w; dx += 34) {
+    const tx = s.x + dx + 8, tw = Math.min(16, s.x + s.w - tx);
+    if (tw > 0) px(tx, s.y + 22, tw, 6, C.dirtD);
+  }
   if (s.kind === "ground") {
     px(s.x, s.y, s.w, 12, C.grass);
-    for (let dx = 0; dx < s.w; dx += 22) px(s.x + dx, s.y, 10, 5, C.grassD);
+    for (let dx = 0; dx < s.w; dx += 22) {
+      const tw = Math.min(10, s.x + s.w - (s.x + dx));
+      if (tw > 0) px(s.x + dx, s.y, tw, 5, C.grassD);
+    }
   } else {
     px(s.x, s.y, s.w, 6, C.stoneD);
   }
@@ -590,10 +768,24 @@ function drawOneway(p) {
   // 悬浮平台：草顶泥板
   px(p.x, p.y, p.w, p.h, C.dirt);
   px(p.x, p.y, p.w, 9, C.grass);
-  for (let dx = 0; dx < p.w; dx += 22) px(p.x + dx, p.y, 10, 4, C.grassD);
+  for (let dx = 0; dx < p.w; dx += 22) {
+    const tw = Math.min(10, p.w - dx);
+    if (tw > 0) px(p.x + dx, p.y, tw, 4, C.grassD);
+  }
   px(p.x, p.y + p.h - 3, p.w, 3, C.dirtD);
 }
 function drawMover(m) {
+  if (m.fragile) {
+    // 易碎移动平台：曲奇板（含裂纹/修复进度）+ 上下箭头
+    if (!m.broken) {
+      const a = Math.sin(performance.now() / 300) > 0 ? "rgba(255,255,255,.9)" : "rgba(255,255,255,.45)";
+      const cx = m.x + m.w / 2;
+      px(cx - 3, m.y - 14, 6, 8, a);
+      px(cx - 8, m.y - 8, 16, 3, a);
+    }
+    drawFragTile(m.x, m.y, m.w, 16, m);
+    return;
+  }
   // 电梯：金属板 + 黄黑警示条 + 上下箭头
   px(m.x, m.y, m.w, 16, C.metal);
   px(m.x, m.y, m.w, 4, "#dfe8f0");
@@ -604,6 +796,66 @@ function drawMover(m) {
   const cx = m.x + m.w / 2;
   px(cx - 3, m.y - 14, 6, 8, a);
   px(cx - 8, m.y - 8, 16, 3, a);
+}
+function drawFragTile(x, y, w, h, o) {
+  if (o.broken) {
+    // 碎裂中：淡淡残影 + 修复进度条
+    ctx.globalAlpha = 0.2;
+    px(x, y, w, h, "#c98f4e");
+    ctx.globalAlpha = 1;
+    px(x, y + h - 3, w * (1 - o.rt / FRAG_REPAIR_T), 3, "#ffd23f");
+    return;
+  }
+  const danger = o.t / FRAG_BREAK_T;
+  const shake = o.t > 0 ? Math.sin(performance.now() / 32) * danger * 3 : 0;
+  const sx = x + shake;
+  // 曲奇板
+  px(sx, y, w, h, "#cf9550");
+  px(sx, y, w, 7, "#e0ac6a");
+  px(sx, y + h - 3, w, 3, "#a9693a");
+  for (let dx = 9; dx < w - 8; dx += 26) px(sx + dx, y + 9, 5, 3, "#8a5a2e");
+  // 裂纹随计时增多
+  if (o.t > 0) {
+    ctx.strokeStyle = "rgba(70,36,12,.85)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    const n = Math.min(5, 1 + Math.floor(danger * 5));
+    for (let i = 0; i < n; i++) {
+      const cxx = sx + w * (0.14 + i * 0.18);
+      ctx.moveTo(cxx, y + 2);
+      ctx.lineTo(cxx + (i % 2 ? 8 : -7), y + h - 2);
+    }
+    ctx.stroke();
+  }
+  // 快碎时红色闪烁警示
+  if (danger > 0.6) {
+    ctx.globalAlpha = (danger - 0.6) / 0.4 * (Math.sin(performance.now() / 55) > 0 ? 1 : 0.25);
+    px(sx, y, w, 3, "#ff5a4a");
+    ctx.globalAlpha = 1;
+  }
+}
+function drawFrag(f) { drawFragTile(f.x, f.y, f.w, f.h, f); }
+function drawOrb(o) {
+  if (o.taken) {
+    // 已用掉：暗色核心（落地即刻恢复，不再等充能）
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = "#9fd8ff";
+    ctx.beginPath(); ctx.arc(o.x, o.y, 7, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+    return;
+  }
+  const pulse = 1 + Math.sin(performance.now() / 200) * 0.14;
+  ctx.fillStyle = "rgba(255,210,63,.20)";
+  ctx.beginPath(); ctx.arc(o.x, o.y, 21 * pulse, 0, 7); ctx.fill();
+  ctx.fillStyle = "rgba(159,216,255,.35)";
+  ctx.beginPath(); ctx.arc(o.x, o.y, 14 * pulse, 0, 7); ctx.fill();
+  px(o.x - 7, o.y - 7, 14, 14, "#ffd23f");
+  px(o.x - 4, o.y - 5, 8, 9, "#fff6e8");
+  // 向上箭头（跳跃能量）
+  px(o.x - 4, o.y + 2, 8, 3, "#c98a1e");
+  px(o.x - 1, o.y - 4, 3, 4, "#c98a1e");
+  ctx.strokeStyle = "rgba(255,255,255,.75)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(o.x, o.y, 11, 0, 7); ctx.stroke();
 }
 function drawCake() {
   if (cakeEaten) return;
@@ -684,8 +936,8 @@ function drawHUD() {
   pixelText(cakeEaten ? "🍰 已到手 → 🏠 快回家！" : "🍰 先吃蛋糕，🏠 才会开门", W / 2, 36, 12, "#fff", "center");
   // 复活提示
   if (toastT > 0) pixelText(toast, W / 2, 60, 13, "#ffe873", "center");
-  // 操作提示（第一关由新手教程系统接管，不在底部重复显示）
-  if (hintT > 0 && state === ST.PLAY && levelIdx !== 0) {
+  // 操作提示（前两关由教程系统接管，不在底部重复显示）
+  if (hintT > 0 && state === ST.PLAY && levelIdx > 1) {
     ctx.globalAlpha = Math.min(1, hintT);
     pixelText(IS_TOUCH ? "左半屏拖动 = 移动 · 右半屏点按 = 跳跃" : "←→/AD 移动 · 空格/↑ 跳跃 · R 重开本关",
               W / 2, H - 26, 12, "#fff", "center");
@@ -709,7 +961,9 @@ function drawBubble(lines, cx, cy) {
   lines.forEach((s, i) => pixelText(s, x + w / 2, y + padY + i * lh, 13, "#fff", "center", false));
 }
 function drawTutorial() {
-  if (levelIdx !== 0 || state !== ST.PLAY) return;
+  if (state !== ST.PLAY) return;
+  if (levelIdx === 1) return drawTut2();      // 第二关：新机关教学
+  if (levelIdx !== 0) return;
   // 开局规则面板：操作 + 游戏规则
   if (hintT > 0) {
     const bw = 470, bh = 128, x0 = (W - bw) / 2, y0 = 74;
@@ -752,8 +1006,31 @@ function drawTutorial() {
   }
   if (lines) drawBubble(lines, cx, cy);
 }
+/* ---- 第二关「烘焙的精髓」教学：只介绍易碎平台 ---- */
+function drawTut2() {
+  if (hintT > 0) {
+    const bw = 500, bh = 78, x0 = (W - bw) / 2, y0 = 74;
+    ctx.globalAlpha = Math.min(1, hintT / 1.5);
+    px(x0 + 4, y0 + 4, bw, bh, "rgba(0,0,0,.35)");
+    px(x0, y0, bw, bh, "rgba(20,12,45,.9)");
+    px(x0, y0, bw, 4, C.panelE); px(x0, y0 + bh - 4, bw, 4, C.panelE);
+    pixelText("🍪 烘焙的精髓", W / 2, y0 + 12, 19, "#ffd23f", "center", false);
+    pixelText("易碎平台：踩过一次 1 秒后碎裂，4 秒后重新修复", W / 2, y0 + 46, 14, "#fff", "center", false);
+    ctx.globalAlpha = 1;
+  }
+  // 情境提示气泡：只提易碎平台
+  const feet = player.y + player.h;
+  let lines = null, cx = 0, cy = 0;
+  if (player.stand && player.stand.armed) {
+    lines = ["这块曲奇 1 秒后就会碎，快跳走！"]; cx = player.x + 15; cy = player.y - 46;
+  } else if (!cakeEaten && feet > 460 && player.x < 300) {
+    lines = ["踩上会上下移动的曲奇 →", "它 1 秒后就会碎，别久留"]; cx = 300; cy = 380;
+  }
+  if (lines) drawBubble(lines, cx, cy);
+}
 function drawTouchControls() {
   if (!IS_TOUCH) return;
+  const knob = IS_TOUCH ? 26 : 20;          // 摇杆滑块半径（触屏同步放大）
   // 摇杆
   if (joy.active) {
     ctx.fillStyle = "rgba(20,12,45,.3)";
@@ -761,55 +1038,71 @@ function drawTouchControls() {
     ctx.strokeStyle = "rgba(255,255,255,.6)"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(joy.ax, joy.ay, joyR, 0, 7); ctx.stroke();
     ctx.fillStyle = "rgba(255,210,63,.85)";
-    ctx.beginPath(); ctx.arc(joy.ax + joy.dx, joy.ay + joy.dy, 20, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(joy.ax + joy.dx, joy.ay + joy.dy, knob, 0, 7); ctx.fill();
   } else {
     ctx.fillStyle = "rgba(20,12,45,.22)";
-    ctx.beginPath(); ctx.arc(86, H - 92, joyR, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(JOY_IDLE.x, JOY_IDLE.y, joyR, 0, 7); ctx.fill();
     ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(86, H - 92, joyR, 0, 7); ctx.stroke();
-    pixelText("移\n动", 86 - 10, H - 104, 14, "rgba(255,255,255,.6)");
+    ctx.beginPath(); ctx.arc(JOY_IDLE.x, JOY_IDLE.y, joyR, 0, 7); ctx.stroke();
+    pixelText("移动", JOY_IDLE.x, JOY_IDLE.y - 10, IS_TOUCH ? 16 : 14, "rgba(255,255,255,.6)", "center", false);
   }
   // 跳跃按钮
   const glow = jumpBtnHold;
+  const jfs = IS_TOUCH ? 32 : 24;
   ctx.fillStyle = glow ? "rgba(255,210,63,.6)" : "rgba(20,12,45,.3)";
   ctx.beginPath(); ctx.arc(JUMP_BTN.x, JUMP_BTN.y, JUMP_BTN.r, 0, 7); ctx.fill();
   ctx.strokeStyle = glow ? "#ffd23f" : "rgba(255,255,255,.5)"; ctx.lineWidth = 3;
   ctx.beginPath(); ctx.arc(JUMP_BTN.x, JUMP_BTN.y, JUMP_BTN.r, 0, 7); ctx.stroke();
-  pixelText("跳", JUMP_BTN.x - 14, JUMP_BTN.y - 14, 24, "#fff");
+  pixelText("跳", JUMP_BTN.x - jfs * 0.58, JUMP_BTN.y - jfs / 2 - 1, jfs, "#fff", "left", false);
 }
 function drawButton(b, hover) {
   const c = hover ? "#ffe278" : C.btn;
+  const fs = IS_TOUCH ? 21 : 15;                     // 触屏按钮更大，字号同步放大
   px(b.x + 3, b.y + 3, b.w, b.h, "rgba(0,0,0,.35)");
   px(b.x, b.y, b.w, b.h, c);
   px(b.x, b.y, b.w, 4, "#fff3c0");
   px(b.x, b.y + b.h - 4, b.w, 4, C.btnD);
-  pixelText(b.label, b.x + b.w / 2, b.y + (b.h - 14) / 2, 15, C.btnText, "center", false);
+  pixelText(b.label, b.x + b.w / 2, b.y + (b.h - fs) / 2 + 1, fs, C.btnText, "center", false);
 }
-function drawHubButton() {
-  px(HUB_BTN.x, HUB_BTN.y, HUB_BTN.w, HUB_BTN.h, "rgba(20,12,45,.55)");
-  px(HUB_BTN.x, HUB_BTN.y, HUB_BTN.w, 3, "rgba(255,255,255,.4)");
-  pixelText(HUB_BTN.label, HUB_BTN.x + HUB_BTN.w / 2, HUB_BTN.y + 6, 13, "#fff", "center", false);
+/* 顶栏小按钮（返回大厅 / 返回）配色与字号统一 */
+function drawTopBtn(b) {
+  const fs = IS_TOUCH ? 17 : 13;
+  px(b.x, b.y, b.w, b.h, "rgba(20,12,45,.6)");
+  px(b.x, b.y, b.w, 3, "rgba(255,255,255,.4)");
+  pixelText(b.label, b.x + b.w / 2, b.y + (b.h - fs) / 2 + 1, fs, "#fff", "center", false);
 }
 function render() {
   drawBackground();
   if (!LV) { drawMenu(); return; }
 
   // 场景
+  // 深坑阴影（提示这里是深渊）
+  if (LV.pit) {
+    const pg = ctx.createLinearGradient(0, 470, 0, H);
+    pg.addColorStop(0, "rgba(20,12,45,.12)");
+    pg.addColorStop(1, "rgba(20,12,45,.92)");
+    ctx.fillStyle = pg;
+    ctx.fillRect(LV.pit.x, 470, LV.pit.w, H - 470);
+  }
   for (const s of LV.solids) drawSolid(s);
   for (const p of LV.oneways) drawOneway(p);
+  for (const f of LV.frags) drawFrag(f);
+  for (const o of LV.orbs) drawOrb(o);
   for (const m of LV.movers) drawMover(m);
   drawHome();
   drawCake();
   drawParticles();
-  if (state !== ST.MENU) drawPlayer();
+  if (state === ST.PLAY || state === ST.WIN) drawPlayer();
 
   if (state === ST.PLAY) {
     drawHUD();
     drawTutorial();
-    drawHubButton();
+    drawTopBtn(HUB_BTN);
     drawTouchControls();
   } else if (state === ST.MENU) {
     drawMenu();
+  } else if (state === ST.SELECT) {
+    drawSelect();
   } else if (state === ST.WIN) {
     drawHUD();
     if (winT > 0.4) drawWinPanel();
@@ -822,6 +1115,8 @@ function drawMenu() {
     for (const s of LV.solids) drawSolid(s);
     for (const p of LV.oneways) drawOneway(p);
     for (const m of LV.movers) drawMover(m);
+    for (const f of LV.frags) drawFrag(f);
+    for (const o of LV.orbs) drawOrb(o);
     drawHome(); drawCake();
     ctx.fillStyle = "rgba(20,12,45,.55)";
     ctx.fillRect(0, 0, W, H);
@@ -836,16 +1131,49 @@ function drawMenu() {
   pixelText("奶龙吃蛋糕", W / 2, ty, 44, "#ffd23f", "center", false);
   pixelText("吃到蛋糕 · 平台间跳跃 · 安全回家", W / 2, 186, 15, "#cfe8ff", "center");
 
-  for (const lb of levelButtons()) {
-    drawButton(lb, false);
-    if (!lb.unlocked) {
-      ctx.fillStyle = "rgba(20,12,45,.6)";
-      ctx.fillRect(lb.x, lb.y, lb.w, lb.h);
-      pixelText(lb.label + " 🔒", lb.x + lb.w / 2, lb.y + 14, 15, "#8f86b8", "center", false);
+  drawButton(BTN_START, false);
+  drawButton(BTN_SELECT, false);
+  drawTopBtn(HUB_BTN);
+  if (!IS_TOUCH) pixelText("空格快速开始 · 选关挑选关卡", W / 2, BTN_START.y + BTN_START.h + 26, 12, "#fff", "center");
+}
+/* ---- 选关界面 ---- */
+function drawSelect() {
+  ctx.fillStyle = "rgba(20,12,45,.76)";
+  ctx.fillRect(0, 0, W, H);
+
+  const ty = 38 + Math.round(Math.sin(performance.now() / 400) * 2);
+  pixelText("选择关卡", W / 2 + 3, ty + 3, 38, "rgba(0,0,0,.45)", "center", false);
+  pixelText("选择关卡", W / 2, ty, 38, "#ffd23f", "center", false);
+  pixelText(`已通关 ${Math.max(0, progress - 1)} / ${LEVELS.length} 关`, W / 2, 116, 13, "#cfe8ff", "center");
+
+  for (const lc of levelCards()) {
+    px(lc.x + 4, lc.y + 4, lc.w, lc.h, "rgba(0,0,0,.35)");
+    px(lc.x, lc.y, lc.w, lc.h, lc.cleared ? "#33543a" : C.panel);
+    px(lc.x, lc.y, 6, lc.h, lc.cleared ? "#7ed37f" : C.panelE);
+    px(lc.x, lc.y, lc.w, 4, "#fff3c0");
+    // 关卡序号
+    px(lc.x + 18, lc.y + 24, 46, 46, "#241b47");
+    px(lc.x + 18, lc.y + 24, 46, 4, lc.cleared ? "#7ed37f" : C.panelE);
+    pixelText(String(lc.idx + 1), lc.x + 41, lc.y + 35, 24, "#ffd23f", "center", false);
+    // 关卡名与状态
+    pixelText(lc.label, lc.x + 78, lc.y + 24, 18, "#fff", "left", false);
+    pixelText(lc.cleared ? "已通关 ✓" : "待挑战", lc.x + 78, lc.y + 52, 13,
+              lc.cleared ? "#9fe0a2" : "#cfe8ff", "left", false);
+    // 机关标签
+    let tx = lc.x + 78;
+    for (const tg of lc.tags) {
+      const tw = tg.length * 12 + 14;
+      px(tx, lc.y + 70, tw, 17, "rgba(255,210,63,.16)");
+      ctx.strokeStyle = "rgba(255,210,63,.5)"; ctx.lineWidth = 1;
+      ctx.strokeRect(tx + 0.5, lc.y + 70.5, tw - 1, 16);
+      pixelText(tg, tx + tw / 2, lc.y + 74, 11, "#ffe873", "center", false);
+      tx += tw + 8;
     }
   }
-  drawHubButton();
-  if (!IS_TOUCH) pixelText("点击关卡开始 · 空格快速开始", W / 2, 400, 12, "#fff", "center");
+
+  drawTopBtn(BTN_BACK);
+
+  if (!IS_TOUCH) pixelText("点击卡片开始 · ESC 返回", W / 2, H - 36, 12, "#cfe8ff", "center");
 }
 function drawWinPanel() {
   ctx.fillStyle = "rgba(10,6,28,.6)";
@@ -862,29 +1190,37 @@ function drawWinPanel() {
   pixelText("奶龙吃到了蛋糕，安全到家啦！", W / 2, y0 + 82, 15, "#cfe8ff", "center");
   pixelText(`本关：${LV.name}`, W / 2, y0 + 108, 13, "#9fd8ff", "center");
 
-  // 按钮
+  // 按钮（触屏下更大，字号同步放大）
   const hasNext = levelIdx + 1 < LEVELS.length;
+  const bfs = IS_TOUCH ? 20 : 15;
+  const byOf = b => b.y + (b.h - bfs) / 2 + 1;
   // 下一关
   px(BTN_NEXT.x + 3, BTN_NEXT.y + 3, BTN_NEXT.w, BTN_NEXT.h, "rgba(0,0,0,.35)");
   px(BTN_NEXT.x, BTN_NEXT.y, BTN_NEXT.w, BTN_NEXT.h, hasNext ? C.btn : "#554a7a");
-  pixelText(hasNext ? "下一关" : "敬请期待", BTN_NEXT.x + BTN_NEXT.w / 2, BTN_NEXT.y + 15, 15, hasNext ? C.btnText : "#a89cc8", "center", false);
+  pixelText(hasNext ? "下一关" : "敬请期待", BTN_NEXT.x + BTN_NEXT.w / 2, byOf(BTN_NEXT), bfs, hasNext ? C.btnText : "#a89cc8", "center", false);
   // 再玩一次
   px(BTN_AGAIN.x + 3, BTN_AGAIN.y + 3, BTN_AGAIN.w, BTN_AGAIN.h, "rgba(0,0,0,.35)");
   px(BTN_AGAIN.x, BTN_AGAIN.y, BTN_AGAIN.w, BTN_AGAIN.h, "#9fd8ff");
-  pixelText("再玩一次", BTN_AGAIN.x + BTN_AGAIN.w / 2, BTN_AGAIN.y + 15, 15, "#0e2a4a", "center", false);
+  pixelText("再玩一次", BTN_AGAIN.x + BTN_AGAIN.w / 2, byOf(BTN_AGAIN), bfs, "#0e2a4a", "center", false);
   // 返回大厅
   px(BTN_HUB2.x + 3, BTN_HUB2.y + 3, BTN_HUB2.w, BTN_HUB2.h, "rgba(0,0,0,.35)");
   px(BTN_HUB2.x, BTN_HUB2.y, BTN_HUB2.w, BTN_HUB2.h, "#ff9aa9");
-  pixelText("返回大厅", BTN_HUB2.x + BTN_HUB2.w / 2, BTN_HUB2.y + 15, 15, "#5a1020", "center", false);
+  pixelText("返回大厅", BTN_HUB2.x + BTN_HUB2.w / 2, byOf(BTN_HUB2), bfs, "#5a1020", "center", false);
 }
 
-/* ================= 移动端画布适配（与跑酷同方案） ================= */
-function fitWrap() {
+/* ================= 移动端画布适配（与跑酷同方案） =================
+   纯 CSS 视口单位在微信等内置浏览器里不可靠，用 JS 读 innerWidth/innerHeight 精确计算；
+   竖屏时把 #wrap 旋转 90° 模拟横屏，让画布尽量铺满整屏。 */
+let wrapRotated = false;
+function layoutWrap(w, h, touch) {
   const wrap = document.getElementById("wrap");
-  const vw = innerWidth, vh = innerHeight;
-  const scale = Math.min(vw * 0.98 / W, vh * 0.94 / H);
-  wrap.style.width = Math.floor(W * scale) + "px";
+  if (!touch) { wrap.style.width = ""; wrap.style.transform = ""; wrapRotated = false; return; }
+  wrapRotated = h > w;                                          // 竖屏 → 旋转 90°
+  const cw = wrapRotated ? Math.min(w * 16 / 9, h) : Math.min(w, h * 16 / 9);
+  wrap.style.width = Math.round(cw) + "px";
+  wrap.style.transform = wrapRotated ? "rotate(90deg)" : "none";
 }
+function fitWrap() { layoutWrap(innerWidth, innerHeight, IS_TOUCH); }
 addEventListener("resize", fitWrap);
 addEventListener("orientationchange", fitWrap);
 fitWrap();
