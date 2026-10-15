@@ -58,7 +58,7 @@ const GROUND_Y = 224;           // 地面顶面 y
 const PLAYER_SCREEN_X = 92;     // 奶龙固定在屏幕上的 x
 const GRAVITY = 1500;
 const JUMP_V = [-420, -470, -520];   // 三段跳初速度：一次比一次高
-const GLIDE_V = 110;                 // 奶娃技能：滑翔时的最大下落速度（正常下落会不断加速）
+const GLIDE_V = 110;                 // 奶蛙技能：滑翔时的最大下落速度（正常下落会不断加速）
 const BASE_SPEED = 135;
 const MAX_SPEED = 250;
 
@@ -574,7 +574,7 @@ function update(dt) {
 
   // 纵向物理
   player.vy += GRAVITY * dt;
-  // 奶娃技能：跳跃后开始滑翔，下落速度被限制在 GLIDE_V，缓慢降落
+  // 奶蛙技能：跳跃后开始滑翔，下落速度被限制在 GLIDE_V，缓慢降落
   if (skin === "naiwa" && !player.grounded && player.vy > GLIDE_V) player.vy = GLIDE_V;
   player.y += player.vy * dt;
   const floorY = GROUND_Y - player.h;
@@ -958,7 +958,7 @@ NAILONG_JUMP[14] = ".....yyyyyy.....";
 NAILONG_JUMP[15] = "................";
 const SPR = { runA: NAILONG_BODY, runB: NAILONG_RUNB, jump: NAILONG_JUMP };
 
-/* ---- 奶娃：奶龙的幼崽版——头更小、身子更胖（大圆肚）、腿更修长（复用奶龙调色板） ----
+/* ---- 奶蛙：奶龙的幼崽版——头更小、身子更胖（大圆肚）、腿更修长（复用奶龙调色板） ----
    ★ 每行必须恰好16字符 */
 const NAIWA_BODY = [
   ".....####.......",    // r0 头顶（比奶龙窄）
@@ -1139,7 +1139,7 @@ const SKINS = {
             mouth: { r: [2, -17, 10, 5], inner: [4, -15, 6, 3] } }
   },
   naiwa: {
-    name: "奶娃", need: 0, spr: NAIWA_SPR, pal: NAILONG_PAL,          // 头小身胖腿长的幼崽造型，初始解锁
+    name: "奶蛙", need: 0, spr: NAIWA_SPR, pal: NAILONG_PAL,          // 头小身胖腿长的幼崽造型，初始解锁
     skillDesc: ["跳跃后开始滑翔", "以较慢的速度降落"],
     pc: ["#ffc93c", "#efa01e"],                                     // 死亡碎片颜色
     blink: { fill: "#ffc93c", line: "#6e3a12", r: [-2, -28, 8, 4], l: [-1, -26, 6, 1] },
@@ -1266,7 +1266,7 @@ function drawNailong() {
   ctx.translate(ax, ay);
   if (angle) ctx.rotate(angle);
   ctx.scale(sx, sy);
-  // 奶娃技能：滑翔（空中下落）时背后长出一对小翅膀，两帧扇动
+  // 奶蛙技能：滑翔（空中下落）时背后长出一对小翅膀，两帧扇动
   if (skin === "naiwa" && !player.grounded && !player.dead && player.vy > 0) {
     const up = Math.floor(now / 120) % 2 === 0;         // 扇动节奏
     const wy = up ? -18 : -14;                          // 翅根高度随帧上下

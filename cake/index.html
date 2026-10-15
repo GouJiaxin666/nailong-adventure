@@ -110,6 +110,128 @@ NAILONG_JUMP[14] = ".....yyyyyy.....";
 NAILONG_JUMP[15] = "................";
 const SPR = { runA: NAILONG_BODY, runB: NAILONG_RUNB, jump: NAILONG_JUMP };
 
+/* ---- 奶蛙：奶龙的幼崽版——头更小、身子更胖、腿更修长（复用奶龙调色板，每行恰好16字符） ---- */
+const NAIWA_BODY = [
+  ".....####.......",
+  "....#yyyyyy#....",
+  "....#yyywgwy#...",
+  "....#yyywwyy#...",
+  "....#yymmyyy#...",
+  "....##yyyy##....",
+  "..#yyyyyyyyyy#..",
+  ".#yyyybbbbbyyy#.",
+  ".#yyybbbbbbbyy#.",
+  ".#yyybbbbbbbyy#.",
+  ".#oyybbbbbbbyy#.",
+  "..#yybbbbbbyy#..",
+  "..#yyyyyyyyyy#..",
+  "....yy...yy.....",
+  "....yy...yy.....",
+  "...ppp..ppp....."
+];
+const NAIWA_RUNB = NAIWA_BODY.slice();
+NAIWA_RUNB[14] = ".....yy...yy....";
+NAIWA_RUNB[15] = "....ppp...ppp...";
+const NAIWA_JUMP = NAIWA_BODY.slice();
+NAIWA_JUMP[13] = "....yyyyyy......";
+NAIWA_JUMP[14] = ".....pppp.......";
+NAIWA_JUMP[15] = "................";
+const NAIWA_SPR = { runA: NAIWA_BODY, runB: NAIWA_RUNB, jump: NAIWA_JUMP };
+
+/* ---- 坤哥（公鸡）：红鸡冠 + 白羽头 + 黄喙红肉垂 + 蓝色背带裤 + 墨绿尾羽（每行恰好16字符） ---- */
+const KUNGE_PAL = { "r": "#e03a2e", "w": "#fdf3e0", "k": "#161616", "y": "#f0a030", "b": "#3a6fd0", "t": "#2a5a44" };
+const KUNGE_BODY = [
+  ".....rrrr.......",
+  "....rrrrrr......",
+  "....wwwwww......",
+  "...wwwwwwwww....",
+  "...wwkwwwwyyy...",
+  "...wwwwwwwyy....",
+  "...wwwwwwwrr....",
+  "tt.wwwwwwww.....",
+  "tttwwwwwwwww....",
+  "tttwwbwwwbww....",
+  "tt.bbbbbbbbb....",
+  "tt.bbbbbbbbb....",
+  ".t.bbbbbbbbb....",
+  "...bbbbbbbbb....",
+  "...bb...bb......",
+  "...yy...yy......"
+];
+const KUNGE_RUNB = KUNGE_BODY.slice();
+KUNGE_RUNB[15] = "....yy...yy.....";
+const KUNGE_JUMP = KUNGE_BODY.slice();
+KUNGE_JUMP[14] = "....bbbb........";
+KUNGE_JUMP[15] = "................";
+const KUNGE_SPR = { runA: KUNGE_BODY, runB: KUNGE_RUNB, jump: KUNGE_JUMP };
+
+/* ---- 雪王：金冠 + 圆润白身 + 蓝眼 + 橙红笑嘴 + 红披风 + 冰淇淋权杖（每行恰好16字符） ---- */
+const SNOWKING_PAL = {
+  "#": "#1a1a1a", "w": "#ffffff", "v": "#c9d8ea", "b": "#2f6fd6",
+  "o": "#f08c1e", "r": "#e33b2e", "g": "#f6c445", "c": "#fdf3e0", "t": "#d99a56"
+};
+const SNOWKING_BODY = [
+  ".cc..g..g..g....",
+  "cccc.ggggggg....",
+  ".tt..#wwwwwww#..",
+  "..t.#wwwwwwww#..",
+  "..g#wwwwwwwwww#.",
+  "..g#wwwwwwwwww#.",
+  "..g#wwbbwwbbww#.",
+  "..g#wwbbwwbbww#.",
+  "..g#wwwwooooww#.",
+  "..g#wwworrrrow#.",
+  "..g#wwwwooooww#.",
+  "..g#wwwwwwwwww#.",
+  "..g.#wwwwwwww#..",
+  ".rr..#wwwwwww#..",
+  "rr...#wwwwwww#..",
+  "rr.gcc.......vv."
+];
+const SNOWKING_RUNB = SNOWKING_BODY.slice();
+SNOWKING_RUNB[15] = "rr.gcc......vvv.";
+const SNOWKING_JUMP = SNOWKING_BODY.slice();
+SNOWKING_JUMP[15] = "rr.gcc..........";
+const SNOWKING_SPR = { runA: SNOWKING_BODY, runB: SNOWKING_RUNB, jump: SNOWKING_JUMP };
+
+/* ---- 锤锤（小狮子）：红色火焰鬃毛 + 黄色圆脸 + 张嘴笑 + 左侧尾巴（每行恰好16字符） ---- */
+const LION_PAL = { "m": "#e05a1a", "y": "#ffc23e", "b": "#ffe1ad", "e": "#33241a", "n": "#7a3b12", "r": "#d43a2a" };
+const LION_BODY = [
+  "....m.mm.mm.....",
+  "..mmmmmmmmmmmm..",
+  ".mmmmmmmmmmmmmm.",
+  "mmm.yyyyyyyy.mmm",
+  "mmm.yyyyyyyy.mmm",
+  "mmm.yyeyyeyy.mmm",
+  "mmm.yyeyyeyy.mmm",
+  "mmm.yyynnyyy.mmm",
+  "mmm.yyrrrrry.mmm",
+  "mmm.yyrrrrry.mmm",
+  "mmm.yyyrrryy.mmm",
+  ".mmyyyyyyyyyymm.",
+  ".mmmyyyyyyyymmm.",
+  "m...yyyyyyyy.mm.",
+  "mm..yyyyyyyy....",
+  "....bb....bb...."
+];
+const LION_RUNB = LION_BODY.slice();
+LION_RUNB[15] = "....bb.....bb...";
+const LION_JUMP = LION_BODY.slice();
+LION_JUMP[14] = "mm...yyyyyy.....";
+LION_JUMP[15] = "................";
+const LION_SPR = { runA: LION_BODY, runB: LION_RUNB, jump: LION_JUMP };
+
+/* ================= 形象（皮肤）系统 =================
+   奶龙/奶蛙 = 初始形象；坤哥/雪王/锤锤 = 通过第 3/6/9 关解锁 */
+const SKINS = {
+  nailong:  { name: "奶龙", need: 0, spr: SPR,          pal: NAILONG_PAL },
+  naiwa:    { name: "奶蛙", need: 0, spr: NAIWA_SPR,    pal: NAILONG_PAL },
+  kunge:    { name: "坤哥", need: 3, spr: KUNGE_SPR,    pal: KUNGE_PAL },
+  snowking: { name: "雪王", need: 6, spr: SNOWKING_SPR, pal: SNOWKING_PAL },
+  lion:     { name: "锤锤", need: 9, spr: LION_SPR,     pal: LION_PAL }
+};
+const SKIN_ORDER = ["nailong", "naiwa", "kunge", "snowking", "lion"];
+
 /* ================= 蛋糕像素图（12×12，scale 4 = 48×48） ================= */
 const CAKE_PAL = { "r": "#e33b4e", "w": "#fff6e8", "p": "#f2a7c3", "b": "#c99056" };
 const CAKE_MAP = [
@@ -225,11 +347,11 @@ const LEVELS = [
     spawn: { x: 80, y: 470 },
     cake:  { x: 565, y: 153 },   // 蛋糕在高空蛋糕台（长梯终点）
     home:  { x: 910, y: 470 },   // 家在最右侧（传送回地面后走过去）
-    pit:   { x: 180, w: 480 },   // 大深坑 180..660（中段 300..520 有地面覆盖）
+    pit:   { x: 160, w: 540 },   // 大深坑 160..700（中段 330..530 有地面覆盖）
     solids: [
-      { x: 0,   y: 470, w: 180, h: 70, kind: "ground" },   // 左下地面（出生）
-      { x: 300, y: 470, w: 220, h: 70, kind: "ground" },   // 中部地面（刺虫①巡逻）
-      { x: 660, y: 470, w: 300, h: 70, kind: "ground" },   // 右侧地面（蓝门 / 家）
+      { x: 0,   y: 470, w: 160, h: 70, kind: "ground" },   // 左下地面（出生）
+      { x: 330, y: 470, w: 200, h: 70, kind: "ground" },   // 中部地面（刺虫①巡逻）
+      { x: 700, y: 470, w: 260, h: 70, kind: "ground" },   // 右侧地面（蓝门 / 家）
       { x: -20, y: -60, w: 1000, h: 60, kind: "stone" },   // 顶棚
       { x: -20, y: 0,   w: 20,  h: 700, kind: "stone" },   // 左墙
       { x: 960, y: 0,   w: 20,  h: 700, kind: "stone" }    // 右墙
@@ -240,20 +362,20 @@ const LEVELS = [
       { x: 510, y: 153, w: 110, h: 16, kind: "float" }     // 蛋糕台（长梯到顶齐平）
     ],
     frags: [
-      { x: 210, y: 420, w: 70, h: 16 }                     // 深坑①上的易碎踏脚石（别久留）
+      { x: 200, y: 420, w: 70, h: 16 }                     // 深坑①上的易碎踏脚石（别久留）
     ],
     movers: [
       // 深坑②上的限时桥：落底时与地面齐平，升起时露出深坑，必须趁停稳快速通过
-      { x: 524, w: 112, yLow: 470, yHigh: 360, speed: 75, pause: 2 },
+      { x: 534, w: 140, yLow: 470, yHigh: 360, speed: 75, pause: 2 },
       // 高空长梯：中转台 ↔ 蛋糕台，顶/底各停 2 秒
       { x: 390, w: 100, yLow: 270, yHigh: 153, speed: 75, pause: 2 }
     ],
     portals: [
-      { x: 700, y: 470 },   // 0 蓝门（右侧地面，去高空）
+      { x: 730, y: 470 },   // 0 蓝门（右侧地面，去高空）
       { x: 80,  y: 310 }    // 1 蓝门（高位孤台，吃完蛋糕原路返回，进门传回地面）
     ],
     bugs: [
-      // 中部地面来回巡逻，右侧留出 480..520 的等电梯空间
+      // 中部地面来回巡逻，右侧留出 480..530 的等电梯空间
       { x1: 350, x2: 480, y: 470, speed: 80, w: 28, h: 16 }
     ],
     hazards: []
@@ -284,6 +406,11 @@ const player = {
 };
 
 let progress = +(localStorage.getItem("nailong_cake_progress") || 1);  // 已解锁关数
+/* ---- 形象：已通关数（progress-1）达到 need 即解锁；失效形象回退奶龙 ---- */
+const skinOk = id => SKINS[id] && progress - 1 >= SKINS[id].need;
+let skin = localStorage.getItem("nailong_cake_skin") || "nailong";
+if (!skinOk(skin)) skin = "nailong";
+let newUnlock = null;          // 本局过关刚解锁的形象 id（结算面板展示用）
 
 /* ================= 音效（WebAudio 方波） ================= */
 let actx = null;
@@ -346,6 +473,7 @@ function loadLevel(i) {
   cakeEaten = false;
   particles = [];
   toast = ""; toastT = 0;
+  newUnlock = null;
   hintT = i === 0 || i === 1 ? 8 : 6;   // 前两关有教程面板，多展示一会
   winT = 0;
   try { laughAudio.pause(); laughAudio.currentTime = 0; } catch (e) {}
@@ -462,6 +590,15 @@ function tapAt(p) {
     if (hitR(p, BTN_START)) { sfxClick(); startLevel(Math.min(progress, LEVELS.length) - 1); }
     else if (hitR(p, BTN_SELECT)) { sfxClick(); state = ST.SELECT; }
     else if (hitR(p, HUB_BTN)) location.href = "../index.html";
+    else {
+      // 形象卡：已解锁的点击换装并持久化
+      for (const sc of skinCards()) {
+        if (hitR(p, sc)) {
+          if (sc.ok) { skin = sc.id; localStorage.setItem("nailong_cake_skin", skin); sfxClick(); }
+          return;
+        }
+      }
+    }
   } else if (state === ST.SELECT) {
     for (const lc of levelCards()) {
       if (hitR(p, lc)) { sfxClick(); startLevel(lc.idx); return; }
@@ -473,23 +610,23 @@ function tapAt(p) {
     else if (hitR(p, BTN_HUB2)) location.href = "../index.html";
   }
 }
-/* ---- 选关界面：关卡卡片（两列网格，关卡变多也能自动排布） ---- */
+/* ---- 选关界面：关卡卡片（三列网格，九关刚好排满一屏） ---- */
 function levelCards() {
   const out = [];
   const n = LEVELS.length;
-  const cols = 2, cw = 300, ch = 96, gx = 34, gy = 22;
-  const x0 = (W - (cols * cw + (cols - 1) * gx)) / 2, y0 = 150;
+  const cols = 3, cw = 290, ch = 100, gx = 15, gy = 18;
+  const x0 = (W - (cols * cw + (cols - 1) * gx)) / 2, y0 = 140;
   // 当前关数据里出现过的机关种类，作为卡片标签
   function tagsOf(L) {
     const t = [];
-    // 新机关优先展示，最多 4 个标签
+    // 新机关优先展示，最多 3 个标签
     if (L.portals && L.portals.length) t.push("传送门");
     if (L.bugs && L.bugs.length) t.push("刺虫");
     if (L.movers && L.movers.length) t.push("移动平台");
     if (L.frags && L.frags.length) t.push("易碎平台");
     if (L.orbs && L.orbs.length) t.push("跳跃能量");
     if (L.pit) t.push("深渊");
-    return t.slice(0, 4);
+    return t.slice(0, 3);
   }
   for (let i = 0; i < n; i++) {
     const r = Math.floor(i / cols), c = i % cols;
@@ -500,6 +637,16 @@ function levelCards() {
   }
   return out;
 }
+/* ---- 主菜单形象卡：五个形象横排，未解锁的半透明挂锁 ---- */
+function skinCards() {
+  const cw = 86, ch = 78, gx = 14;
+  const x0 = (W - (SKIN_ORDER.length * cw + (SKIN_ORDER.length - 1) * gx)) / 2, y0 = 356;
+  return SKIN_ORDER.map((id, i) => ({
+    id, x: x0 + i * (cw + gx), y: y0, w: cw, h: ch,
+    name: SKINS[id].name, need: SKINS[id].need, ok: skinOk(id)
+  }));
+}
+
 /* 触屏下按钮整体放大，保证手指点得准（画布会被缩放到屏幕，逻辑尺寸需相应加大） */
 const BTN_START  = IS_TOUCH ? { x: W / 2 - 212, y: 246, w: 200, h: 62, label: "开始游戏" }
                             : { x: W / 2 - 176, y: 252, w: 164, h: 50, label: "开始游戏" };
@@ -752,7 +899,12 @@ function updatePlayer(dt) {
         player.y + player.h > hm.y - 60 && player.y < hm.y) {
       state = ST.WIN; winT = 0;
       playLaugh();
-      progress = Math.max(progress, Math.min(levelIdx + 2, LEVELS.length));
+      // 过关奖励：首次通过第 3/6/9 关解锁对应形象（结算面板弹提示）
+      for (const id of SKIN_ORDER) {
+        if (SKINS[id].need === levelIdx + 1 && progress - 1 < SKINS[id].need) newUnlock = id;
+      }
+      // 上限放宽到 关数+1：通关最后一关后 progress-1 才能正确等于已通关数（解锁判定/选关勾选都靠它）
+      progress = Math.max(progress, Math.min(levelIdx + 2, LEVELS.length + 1));
       localStorage.setItem("nailong_cake_progress", progress);
       for (let i = 0; i < 60; i++) {
         particles.push({
@@ -1093,9 +1245,10 @@ function drawPlayer() {
   if (player.respawnT > 0) {
     if (Math.floor(performance.now() / 90) % 2 === 0) return;   // 复生闪烁
   }
-  let map = SPR.runA;
-  if (!player.grounded) map = SPR.jump;
-  else if (Math.abs(player.vx) > 10 && Math.floor(player.runT / 0.14) % 2 === 1) map = SPR.runB;
+  const sk = SKINS[skin] || SKINS.nailong;
+  let map = sk.spr.runA;
+  if (!player.grounded) map = sk.spr.jump;
+  else if (Math.abs(player.vx) > 10 && Math.floor(player.runT / 0.14) % 2 === 1) map = sk.spr.runB;
   const sx = player.x + player.w / 2 - 24;
   const sy = player.y + player.h - 50 + 2;
   // 影子
@@ -1103,7 +1256,7 @@ function drawPlayer() {
   ctx.beginPath();
   ctx.ellipse(player.x + player.w / 2, player.y + player.h + 2, 16, 4, 0, 0, 7);
   ctx.fill();
-  drawSprite(map, sx, sy, 3, NAILONG_PAL, player.face < 0);
+  drawSprite(map, sx, sy, 3, sk.pal, player.face < 0);
 }
 function drawParticles() {
   for (const p of particles) {
@@ -1230,11 +1383,11 @@ function drawTut3() {
   let lines = null, cx = 0, cy = 0;
   if (feet > 460 && player.x >= 300 && player.x < 480) {
     lines = ["刺虫在巡逻，找准时机跳过它！"]; cx = 390; cy = 330;
-  } else if (!cakeEaten && feet > 460 && player.x >= 660) {
-    lines = ["走进蓝色传送门 ↑"]; cx = 700; cy = 360;
+  } else if (!cakeEaten && feet > 460 && player.x >= 700) {
+    lines = ["走进蓝色传送门 ↑"]; cx = 730; cy = 360;
   } else if (cakeEaten && feet <= 460) {
     lines = ["原路返回，进蓝门回地面 ←"]; cx = 250; cy = 190;
-  } else if (cakeEaten && feet > 460 && player.x >= 660) {
+  } else if (cakeEaten && feet > 460 && player.x >= 700) {
     lines = ["向右走，家就在前面 →"]; cx = 860; cy = 360;
   }
   if (lines) drawBubble(lines, cx, cy);
@@ -1336,8 +1489,9 @@ function drawMenu() {
     ctx.fillStyle = "rgba(20,12,45,.55)";
     ctx.fillRect(0, 0, W, H);
   }
-  // 奶龙立绘
-  drawSprite(SPR.runA, W / 2 - 36, 96, 4.5, NAILONG_PAL, false);
+  // 当前形象立绘
+  const msk = SKINS[skin] || SKINS.nailong;
+  drawSprite(msk.spr.runA, W / 2 - 36, 96, 4.5, msk.pal, false);
   // 蛋糕点缀
   drawSprite(CAKE_MAP, W / 2 + 52, 130, 3, CAKE_PAL, false);
 
@@ -1349,7 +1503,25 @@ function drawMenu() {
   drawButton(BTN_START, false);
   drawButton(BTN_SELECT, false);
   drawTopBtn(HUB_BTN);
-  if (!IS_TOUCH) pixelText("空格快速开始 · 选关挑选关卡", W / 2, BTN_START.y + BTN_START.h + 26, 12, "#fff", "center");
+  // 形象选择卡（通过第 3/6/9 关解锁新形象）
+  for (const sc of skinCards()) {
+    const sk2 = SKINS[sc.id];
+    const sel = sc.id === skin;
+    px(sc.x + 3, sc.y + 3, sc.w, sc.h, "rgba(0,0,0,.35)");
+    px(sc.x, sc.y, sc.w, sc.h, sel ? "#4a3a86" : C.panel);
+    if (sel) { px(sc.x, sc.y, sc.w, 3, "#ffd23f"); px(sc.x, sc.y + sc.h - 3, sc.w, 3, "#ffd23f"); px(sc.x, sc.y, 3, sc.h, "#ffd23f"); px(sc.x + sc.w - 3, sc.y, 3, sc.h, "#ffd23f"); }
+    if (sc.ok) {
+      drawSprite(sk2.spr.runA, sc.x + (sc.w - 40) / 2, sc.y + 8, 2.5, sk2.pal, false);
+      pixelText(sc.name, sc.x + sc.w / 2, sc.y + 54, 12, "#fff", "center", false);
+    } else {
+      ctx.globalAlpha = 0.35;
+      drawSprite(sk2.spr.runA, sc.x + (sc.w - 40) / 2, sc.y + 8, 2.5, sk2.pal, false);
+      ctx.globalAlpha = 1;
+      pixelText("🔒", sc.x + sc.w / 2, sc.y + 22, 14, "#fff", "center", false);
+      pixelText(`过${sc.need}关`, sc.x + sc.w / 2, sc.y + 54, 12, "#a89cc8", "center", false);
+    }
+  }
+  if (!IS_TOUCH) pixelText("空格快速开始 · 选关挑选关卡 · 点击卡片换形象", W / 2, BTN_START.y + BTN_START.h + 26, 12, "#fff", "center");
 }
 /* ---- 选关界面 ---- */
 function drawSelect() {
@@ -1404,6 +1576,13 @@ function drawWinPanel() {
   pixelText("通过！", W / 2, y0 + 26, 40, "#ffd23f", "center", false);
   pixelText("奶龙吃到了蛋糕，安全到家啦！", W / 2, y0 + 82, 15, "#cfe8ff", "center");
   pixelText(`本关：${LV.name}`, W / 2, y0 + 108, 13, "#9fd8ff", "center");
+  // 过关奖励：刚解锁形象时弹出提示
+  if (newUnlock) {
+    const us = SKINS[newUnlock];
+    pixelText(`🎉 解锁新形象「${us.name}」！`, W / 2 - 30, y0 + 136, 16, "#ffe873", "center", false);
+    drawSprite(us.spr.runA, W / 2 + 128, y0 + 122, 2, us.pal, false);
+    pixelText("已加入主菜单的形象列表", W / 2, y0 + 162, 12, "#9fd8ff", "center", false);
+  }
 
   // 按钮（触屏下更大，字号同步放大）
   const hasNext = levelIdx + 1 < LEVELS.length;
