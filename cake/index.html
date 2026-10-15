@@ -219,6 +219,44 @@ const LEVELS = [
       { x: 620, w: 84, yLow: 470, yHigh: 392, speed: 70, pause: 2, initPause: 4.8, fragile: true }
     ],
     hazards: []
+  },
+  {
+    name: "糖霜的彼岸",
+    spawn: { x: 80, y: 470 },
+    cake:  { x: 565, y: 153 },   // 蛋糕在高空蛋糕台（长梯终点）
+    home:  { x: 910, y: 470 },   // 家在最右侧（传送回地面后走过去）
+    pit:   { x: 180, w: 480 },   // 大深坑 180..660（中段 300..520 有地面覆盖）
+    solids: [
+      { x: 0,   y: 470, w: 180, h: 70, kind: "ground" },   // 左下地面（出生）
+      { x: 300, y: 470, w: 220, h: 70, kind: "ground" },   // 中部地面（刺虫①巡逻）
+      { x: 660, y: 470, w: 300, h: 70, kind: "ground" },   // 右侧地面（蓝门 / 家）
+      { x: -20, y: -60, w: 1000, h: 60, kind: "stone" },   // 顶棚
+      { x: -20, y: 0,   w: 20,  h: 700, kind: "stone" },   // 左墙
+      { x: 960, y: 0,   w: 20,  h: 700, kind: "stone" }    // 右墙
+    ],
+    oneways: [
+      { x: 20,  y: 310, w: 120, h: 16, kind: "float" },    // 蓝门落点（高位孤台，地面跳不上来）
+      { x: 195, y: 270, w: 155, h: 16, kind: "float" },    // 中转台（入口台向右跳上来）
+      { x: 510, y: 153, w: 110, h: 16, kind: "float" }     // 蛋糕台（长梯到顶齐平）
+    ],
+    frags: [
+      { x: 210, y: 420, w: 70, h: 16 }                     // 深坑①上的易碎踏脚石（别久留）
+    ],
+    movers: [
+      // 深坑②上的限时桥：落底时与地面齐平，升起时露出深坑，必须趁停稳快速通过
+      { x: 524, w: 112, yLow: 470, yHigh: 360, speed: 75, pause: 2 },
+      // 高空长梯：中转台 ↔ 蛋糕台，顶/底各停 2 秒
+      { x: 390, w: 100, yLow: 270, yHigh: 153, speed: 75, pause: 2 }
+    ],
+    portals: [
+      { x: 700, y: 470 },   // 0 蓝门（右侧地面，去高空）
+      { x: 80,  y: 310 }    // 1 蓝门（高位孤台，吃完蛋糕原路返回，进门传回地面）
+    ],
+    bugs: [
+      // 中部地面来回巡逻，右侧留出 480..520 的等电梯空间
+      { x1: 350, x2: 480, y: 470, speed: 80, w: 28, h: 16 }
+    ],
+    hazards: []
   }
 ];
 
@@ -241,6 +279,7 @@ const player = {
   face: 1, runT: 0, airT: 0,
   coyote: 0, jbuf: 0,
   airJump: 0,                      // 跳跃能量：拾取后可用一次空中跳跃
+  portalLock: null,                // 传送门防回弹锁定：刚出来的那扇门，离开后才解除
   respawnT: 0
 };
 
@@ -272,6 +311,7 @@ const sfxFall = () => beep(360, 80, 0.3, 0.07, "sawtooth");
 const sfxClick = () => beep(660, 880, 0.07, 0.05);
 const sfxFrag = () => beep(430, 90, 0.18, 0.07, "triangle");
 const sfxOrb  = () => { beep(880, 1320, 0.1, 0.06); beep(1320, 1760, 0.12, 0.05); };
+const sfxWarp = () => { beep(300, 900, 0.12, 0.06, "sine"); beep(900, 1500, 0.16, 0.05, "triangle"); };
 
 /* ---- 回家音效：奶龙大笑（复用跑酷的语音资源） ---- */
 const laughAudio = new Audio(encodeURI("../damaoxian/纯音乐 - 奶龙大笑.mp3"));
@@ -290,6 +330,8 @@ function loadLevel(i) {
   LV = {
     name: src.name, spawn: src.spawn, cake: src.cake, home: src.home, pit: src.pit || null,
     solids: src.solids, oneways: src.oneways, hazards: src.hazards,
+    portals: (src.portals || []).map(p => ({ ...p })),          // 传送门（相邻两个为一对）
+    bugs: (src.bugs || []).map(b => ({ ...b, x: b.x1, dir: 1 })),  // 刺虫（从巡逻左缘开始向右走）
     movers: (src.movers || []).map(m => ({
       ...m,
       y: m.initY !== undefined ? m.initY : m.yLow,
@@ -304,7 +346,7 @@ function loadLevel(i) {
   cakeEaten = false;
   particles = [];
   toast = ""; toastT = 0;
-  hintT = (i === 0 || i === 1) ? 8 : 4.5;   // 前两关有教程面板，多展示一会
+  hintT = i === 0 || i === 1 ? 8 : 6;   // 前两关有教程面板，多展示一会
   winT = 0;
   try { laughAudio.pause(); laughAudio.currentTime = 0; } catch (e) {}
   respawnPlayer(true);
@@ -315,6 +357,7 @@ function respawnPlayer(fresh) {
   player.vx = 0; player.vy = 0;
   player.grounded = true; player.stand = null;
   player.coyote = 0; player.jbuf = 0; player.airJump = 0;
+  player.portalLock = null;                  // 清除传送门防回弹锁定
   for (const o of LV.orbs) o.taken = false;      // 重生时能量球恢复可用
   player.respawnT = fresh ? 0 : 0.6;
 }
@@ -439,11 +482,14 @@ function levelCards() {
   // 当前关数据里出现过的机关种类，作为卡片标签
   function tagsOf(L) {
     const t = [];
+    // 新机关优先展示，最多 4 个标签
+    if (L.portals && L.portals.length) t.push("传送门");
+    if (L.bugs && L.bugs.length) t.push("刺虫");
     if (L.movers && L.movers.length) t.push("移动平台");
     if (L.frags && L.frags.length) t.push("易碎平台");
     if (L.orbs && L.orbs.length) t.push("跳跃能量");
     if (L.pit) t.push("深渊");
-    return t.slice(0, 3);
+    return t.slice(0, 4);
   }
   for (let i = 0; i < n; i++) {
     const r = Math.floor(i / cols), c = i % cols;
@@ -514,6 +560,58 @@ function shatterFrag(o) {
 }
 function updateFrags(dt) {
   for (const f of LV.frags) if (tickFragile(f, dt)) shatterFrag(f);
+}
+
+/* ================= 刺虫（在固定区间来回巡逻，碰到回出生点） ================= */
+function updateBugs(dt) {
+  for (const b of LV.bugs) {
+    b.x += b.dir * b.speed * dt;
+    if (b.x <= b.x1) { b.x = b.x1; b.dir = 1; }
+    if (b.x + b.w >= b.x2) { b.x = b.x2 - b.w; b.dir = -1; }
+  }
+}
+function bugBox(b) {
+  return { x: b.x + 2, y: b.y - b.h, w: b.w - 4, h: b.h };   // 碰撞盒比贴图略收窄
+}
+
+/* ================= 传送门（场景中偶数个，相邻两个成对） ================= */
+function portalBox(p) {
+  return { x: p.x - 13, y: p.y - 46, w: 26, h: 46 };          // 竖立的椭圆形门
+}
+function updatePortals() {
+  if (player.respawnT > 0) return;
+  // 走出出口门的范围后解除锁定，避免在门里来回弹
+  if (player.portalLock && !aabb(player, portalBox(player.portalLock))) player.portalLock = null;
+  for (let i = 0; i < LV.portals.length; i++) {
+    const p = LV.portals[i];
+    if (p === player.portalLock) continue;
+    if (aabb(player, portalBox(p))) {
+      // 标了 need:"cake" 的门要吃到蛋糕后才激活
+      if (p.need === "cake" && !cakeEaten) {
+        if (toastT <= 0) showToast("这扇传送门还暗着，先去吃蛋糕！", 1.8);
+        continue;
+      }
+      const q = LV.portals[i % 2 === 0 ? i + 1 : i - 1];     // 0↔1、2↔3
+      player.x = q.x - player.w / 2;
+      player.y = q.y - player.h;
+      player.vx = 0; player.vy = 0;
+      player.stand = null;
+      player.portalLock = q;                                  // 从 q 出来，先锁住 q
+      sfxWarp();
+      const PORTAL_COLORS = ["#9fd8ff", "#d9a6ff"];
+      const wcol = PORTAL_COLORS[Math.floor(i / 2) % PORTAL_COLORS.length];
+      for (const [px0, py0] of [[p.x, p.y], [q.x, q.y]]) {
+        for (let k = 0; k < 14; k++) {
+          particles.push({
+            x: px0 + (Math.random() - 0.5) * 24, y: py0 - 24 + (Math.random() - 0.5) * 40,
+            vx: (Math.random() - 0.5) * 200, vy: (Math.random() - 0.5) * 200,
+            life: 0.3 + Math.random() * 0.3, color: wcol, size: 3 + Math.random() * 3
+          });
+        }
+      }
+      break;
+    }
+  }
 }
 
 /* ================= 跳跃能量 ================= */
@@ -672,7 +770,16 @@ function updatePlayer(dt) {
       sfxFall();
       respawnPlayer(false);
       showToast("碰到危险啦！回到出生点");
-      break;
+      return;
+    }
+  }
+  // 刺虫：来回巡逻，碰到回出生点
+  for (const b of LV.bugs) {
+    if (aabb(player, bugBox(b))) {
+      sfxFall();
+      respawnPlayer(false);
+      showToast("被刺虫扎到啦！回到出生点");
+      return;
     }
   }
 }
@@ -711,8 +818,10 @@ function update(dt) {
   if (state === ST.PLAY) {
     updateMovers(dt);
     updateFrags(dt);
+    updateBugs(dt);
     updatePlayer(dt);
     updateOrbs(dt);
+    updatePortals();
   } else if (state === ST.WIN) {
     winT += dt;
   }
@@ -835,6 +944,80 @@ function drawFragTile(x, y, w, h, o) {
   }
 }
 function drawFrag(f) { drawFragTile(f.x, f.y, f.w, f.h, f); }
+/* ---- 传送门：椭圆漩涡，同对同色（0/1 蓝对、2/3 紫对）；need:"cake" 的门未吃蛋糕时灰显加锁 ---- */
+function drawPortal(p, idx) {
+  const t = performance.now() / 1000;
+  const PORTAL_COLORS = ["#5ab8ff", "#c060ff"];             // 每对门一种颜色：蓝对 / 紫对
+  const locked = p.need === "cake" && !cakeEaten;
+  const col = locked ? "#8a7fa3" : PORTAL_COLORS[Math.floor(idx / 2) % PORTAL_COLORS.length];
+  const cx = p.x, cy = p.y - 24;
+  // 地面光圈
+  ctx.fillStyle = "rgba(0,0,0,.14)";
+  ctx.beginPath(); ctx.ellipse(cx, p.y + 1, 15, 4, 0, 0, 7); ctx.fill();
+  // 外发光（呼吸；锁定时只剩微光）
+  ctx.globalAlpha = locked ? 0.1 : 0.22 + 0.08 * Math.sin(t * 4 + idx);
+  ctx.fillStyle = col;
+  ctx.beginPath(); ctx.ellipse(cx, cy, 22, 28, 0, 0, 7); ctx.fill();
+  // 门体
+  ctx.globalAlpha = 0.95;
+  ctx.beginPath(); ctx.ellipse(cx, cy, 15, 22, 0, 0, 7); ctx.fill();
+  // 内部暗
+  ctx.fillStyle = "#1b1436";
+  ctx.beginPath(); ctx.ellipse(cx, cy, 10, 17, 0, 0, 7); ctx.fill();
+  if (locked) {
+    // 小锁标记：锁梁 + 锁身 + 钥匙孔
+    px(cx - 5, cy - 8, 10, 3, "#dfe4ec");
+    px(cx - 5, cy - 5, 3, 4, "#dfe4ec");
+    px(cx + 2, cy - 5, 3, 4, "#dfe4ec");
+    px(cx - 6, cy - 1, 12, 9, "#c6ccd6");
+    px(cx - 1, cy + 1, 2, 3, "#5a5468");
+    px(cx - 1, cy + 4, 2, 2, "#5a5468");
+  } else {
+    // 旋转光点
+    ctx.fillStyle = "#fff";
+    for (let i = 0; i < 5; i++) {
+      const a = t * 2.4 + i * 1.257;
+      px(cx + Math.cos(a) * 12 - 2, cy + Math.sin(a) * 19 - 2, 4, 4, "rgba(255,255,255,.9)");
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+/* ---- 刺虫：紫红胖身 + 黄色背刺 + 怒眼，六条小碎腿，在区间内巡逻 ---- */
+function drawBug(b) {
+  const t = performance.now() / 1000;
+  const bob = Math.sin(t * 9) > 0 ? -1 : 0;
+  const wig = Math.sin(t * 14) > 0 ? 1 : -1;
+  ctx.save();
+  ctx.translate(b.x + b.w / 2, b.y + bob);
+  ctx.scale(b.dir, 1);
+  // 六条小碎腿
+  for (let i = 0; i < 3; i++) {
+    const lx = -10 + i * 7;
+    px(lx, -4 + (wig > 0 ? 0 : 1), 2, 4, "#4a2238");
+    px(lx + 5, -4 + (wig > 0 ? 1 : 0), 2, 4, "#4a2238");
+  }
+  // 黄色背刺（阶梯像素模拟尖刺）
+  for (const [sx0, sh] of [[-11, 5], [-5, 7], [1, 7], [7, 5]]) {
+    px(sx0, -14 - sh, 4, sh, "#ffd23f");
+    px(sx0 + 1, -14 - sh - 1, 2, 2, "#ffd23f");
+  }
+  // 圆胖身体
+  px(-13, -12, 26, 10, "#9c4a6b");
+  px(-11, -13, 22, 2, "#b6608a");
+  px(-11, -4, 22, 2, "#6e2f4c");
+  // 体节
+  px(-5, -12, 2, 10, "#6e2f4c");
+  px(3, -12, 2, 10, "#6e2f4c");
+  // 头部（前方）
+  px(9, -12, 5, 8, "#b6608a");
+  // 怒眉 + 白眼黑瞳
+  px(9, -13, 5, 2, "#4a2238");
+  px(10, -11, 3, 3, "#fff");
+  px(11, -10, 2, 2, "#161616");
+  // 小颚
+  px(13, -6, 3, 2, "#4a2238");
+  ctx.restore();
+}
 function drawOrb(o) {
   if (o.taken) {
     // 已用掉：暗色核心（落地即刻恢复，不再等充能）
@@ -963,6 +1146,7 @@ function drawBubble(lines, cx, cy) {
 function drawTutorial() {
   if (state !== ST.PLAY) return;
   if (levelIdx === 1) return drawTut2();      // 第二关：新机关教学
+  if (levelIdx === 2) return drawTut3();      // 第三关：传送门 + 刺虫
   if (levelIdx !== 0) return;
   // 开局规则面板：操作 + 游戏规则
   if (hintT > 0) {
@@ -1028,6 +1212,33 @@ function drawTut2() {
   }
   if (lines) drawBubble(lines, cx, cy);
 }
+/* ---- 第三关「糖霜的彼岸」教学：只讲传送门 + 刺虫 ---- */
+function drawTut3() {
+  if (hintT > 0) {
+    const bw = 540, bh = 100, x0 = (W - bw) / 2, y0 = 74;
+    ctx.globalAlpha = Math.min(1, hintT / 1.5);
+    px(x0 + 4, y0 + 4, bw, bh, "rgba(0,0,0,.35)");
+    px(x0, y0, bw, bh, "rgba(20,12,45,.9)");
+    px(x0, y0, bw, 4, C.panelE); px(x0, y0 + bh - 4, bw, 4, C.panelE);
+    pixelText("🌀 糖霜的彼岸", W / 2, y0 + 12, 19, "#ffd23f", "center", false);
+    pixelText("传送门成对出现：走进一扇就从另一扇出来，回程也靠它", W / 2, y0 + 44, 14, "#9fd8ff", "center", false);
+    pixelText("刺虫在固定路线巡逻，碰到就回起点，找准时机跳过它！", W / 2, y0 + 68, 14, "#fff", "center", false);
+    ctx.globalAlpha = 1;
+  }
+  // 情境提示气泡（只提示传送门与刺虫，其他机关前两关已学过）
+  const feet = player.y + player.h;
+  let lines = null, cx = 0, cy = 0;
+  if (feet > 460 && player.x >= 300 && player.x < 480) {
+    lines = ["刺虫在巡逻，找准时机跳过它！"]; cx = 390; cy = 330;
+  } else if (!cakeEaten && feet > 460 && player.x >= 660) {
+    lines = ["走进蓝色传送门 ↑"]; cx = 700; cy = 360;
+  } else if (cakeEaten && feet <= 460) {
+    lines = ["原路返回，进蓝门回地面 ←"]; cx = 250; cy = 190;
+  } else if (cakeEaten && feet > 460 && player.x >= 660) {
+    lines = ["向右走，家就在前面 →"]; cx = 860; cy = 360;
+  }
+  if (lines) drawBubble(lines, cx, cy);
+}
 function drawTouchControls() {
   if (!IS_TOUCH) return;
   const knob = IS_TOUCH ? 26 : 20;          // 摇杆滑块半径（触屏同步放大）
@@ -1088,6 +1299,8 @@ function render() {
   for (const p of LV.oneways) drawOneway(p);
   for (const f of LV.frags) drawFrag(f);
   for (const o of LV.orbs) drawOrb(o);
+  LV.portals.forEach((p, i) => drawPortal(p, i));
+  for (const b of LV.bugs) drawBug(b);
   for (const m of LV.movers) drawMover(m);
   drawHome();
   drawCake();
@@ -1117,6 +1330,8 @@ function drawMenu() {
     for (const m of LV.movers) drawMover(m);
     for (const f of LV.frags) drawFrag(f);
     for (const o of LV.orbs) drawOrb(o);
+    LV.portals.forEach((p, i) => drawPortal(p, i));
+    for (const b of LV.bugs) drawBug(b);
     drawHome(); drawCake();
     ctx.fillStyle = "rgba(20,12,45,.55)";
     ctx.fillRect(0, 0, W, H);
