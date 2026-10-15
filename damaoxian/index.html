@@ -58,6 +58,7 @@ const GROUND_Y = 224;           // 地面顶面 y
 const PLAYER_SCREEN_X = 92;     // 奶龙固定在屏幕上的 x
 const GRAVITY = 1500;
 const JUMP_V = [-420, -470, -520];   // 三段跳初速度：一次比一次高
+const GLIDE_V = 110;                 // 奶娃技能：滑翔时的最大下落速度（正常下落会不断加速）
 const BASE_SPEED = 135;
 const MAX_SPEED = 250;
 
@@ -355,11 +356,12 @@ function gameOver() {
     best = score;
     localStorage.setItem("nailong_best", best);
   }
-  // 进阶模式最高分记录 → 解锁形象（6000 雪王 / 12000 吃豆人 / 18000 锤锤，可同局连解，只提示最高档）
+  // 进阶模式最高分记录 → 解锁形象（2500 坤哥 / 6000 雪王 / 12000 吃豆人 / 18000 锤锤，可同局连解，只提示最高档）
   if (gameMode === "hard" && score > bestHard) {
     if (bestHard < 18000 && score >= 18000) newUnlock = "lion";
     else if (bestHard < 12000 && score >= 12000) newUnlock = "pacman";
     else if (bestHard < 6000 && score >= 6000) newUnlock = "snowking";
+    else if (bestHard < 2500 && score >= 2500) newUnlock = "kunge";
     bestHard = score;
     localStorage.setItem("nailong_best_hard", bestHard);
   }
@@ -416,7 +418,8 @@ function fire() {
     }
   }
   fireCd = 0.3;
-  projectiles.push({ x: player.x + 20, y: player.y + 12, vx: 520, dead: false });
+  // 坤哥技能：发射的子弹替换为篮球（16×14 更大、命中判定范围更大），发射点上移保持中心高度
+  projectiles.push({ x: player.x + 20, y: player.y + 8, vx: 520, dead: false, ball: skin === "kunge" });
   sfxFire();
   for (let i = 0; i < 4; i++) {
     particles.push({
@@ -571,6 +574,8 @@ function update(dt) {
 
   // 纵向物理
   player.vy += GRAVITY * dt;
+  // 奶娃技能：跳跃后开始滑翔，下落速度被限制在 GLIDE_V，缓慢降落
+  if (skin === "naiwa" && !player.grounded && player.vy > GLIDE_V) player.vy = GLIDE_V;
   player.y += player.vy * dt;
   const floorY = GROUND_Y - player.h;
   if (player.y >= floorY) {
@@ -690,11 +695,13 @@ function update(dt) {
     for (const p of projectiles) p.x += p.vx * dt;
     for (const p of projectiles) {
       if (p.dead) continue;
+      // 坤哥技能：篮球弹体更大（16×14），且命中盒四周额外外扩 5px
+      const pw = p.ball ? 16 : 8, ph = p.ball ? 14 : 4, ex = p.ball ? 5 : 0;
       // 命中飞鸟：+200 分，羽毛四散
       for (const b of birds) {
         if (b.dead) continue;
         const bsx = b.wx - worldX + PLAYER_SCREEN_X;
-        if (p.x + 8 > bsx - 2 && p.x < bsx + 18 && p.y + 4 > b.y - 6 && p.y < b.y + 8) {
+        if (p.x + pw > bsx - 2 - ex && p.x < bsx + 18 + ex && p.y + ph > b.y - 6 - ex && p.y < b.y + 8 + ex) {
           p.dead = true;
           b.dead = true;
           scoreBonus += 200;
@@ -714,7 +721,7 @@ function update(dt) {
       for (const b of bats) {
         if (b.dead) continue;
         const bsx = b.wx - worldX + PLAYER_SCREEN_X;
-        if (p.x + 8 > bsx - 2 && p.x < bsx + b.w + 2 && p.y + 4 > b.y - 4 && p.y < b.y + b.h + 4) {
+        if (p.x + pw > bsx - 2 - ex && p.x < bsx + b.w + 2 + ex && p.y + ph > b.y - 4 - ex && p.y < b.y + b.h + 4 + ex) {
           p.dead = true;
           b.dead = true;
           scoreBonus += 100;
@@ -734,9 +741,9 @@ function update(dt) {
         const sx = o.wx - worldX + PLAYER_SCREEN_X;
         if (sx < -60 || sx > W + 30) continue;
         const ob = obstacleBox(o, sx);
-        // 弹药命中盒：比玩家碰撞盒宽大（横向±4、纵向到地面），低矮的刺虫/荆棘也能打中
-        const hb = { x: sx - 4, y: GROUND_Y - o.h - 6, w: o.w + 8, h: o.h + 6 };
-        if (p.x + 8 > hb.x && p.x < hb.x + hb.w && p.y + 4 > hb.y && p.y < hb.y + hb.h) {
+        // 弹药命中盒：比玩家碰撞盒宽大（横向±4、纵向到地面），低矮的刺虫/荆棘也能打中；篮球再外扩 ex
+        const hb = { x: sx - 4 - ex, y: GROUND_Y - o.h - 6 - ex, w: o.w + 8 + 2 * ex, h: o.h + 6 + ex };
+        if (p.x + pw > hb.x && p.x < hb.x + hb.w && p.y + ph > hb.y && p.y < hb.y + hb.h) {
           p.dead = true;
           o.dead = true;
           scoreBonus += 100;
@@ -951,6 +958,37 @@ NAILONG_JUMP[14] = ".....yyyyyy.....";
 NAILONG_JUMP[15] = "................";
 const SPR = { runA: NAILONG_BODY, runB: NAILONG_RUNB, jump: NAILONG_JUMP };
 
+/* ---- 奶娃：奶龙的幼崽版——头更小、身子更胖（大圆肚）、腿更修长（复用奶龙调色板） ----
+   ★ 每行必须恰好16字符 */
+const NAIWA_BODY = [
+  ".....####.......",    // r0 头顶（比奶龙窄）
+  "....#yyyyyy#....",    // r1 头
+  "....#yyywgwy#...",    // r2 眼（白 + 绿瞳）
+  "....#yyywwyy#...",    // r3 眼下
+  "....#yymmyyy#...",    // r4 小嘴
+  "....##yyyy##....",    // r5 短颈
+  "..#yyyyyyyyyy#..",    // r6 胖身子开始（12列，比奶龙宽）
+  ".#yyyybbbbbyyy#.",    // r7 奶油肚
+  ".#yyybbbbbbbyy#.",    // r8 肚子最宽（14列）
+  ".#yyybbbbbbbyy#.",    // r9
+  ".#oyybbbbbbbyy#.",    // r10 背部阴影
+  "..#yybbbbbbyy#..",    // r11 收窄
+  "..#yyyyyyyyyy#..",    // r12 臀
+  "....yy...yy.....",    // r13 修长的腿（无描边细腿）
+  "....yy...yy.....",    // r14
+  "...ppp..ppp....."     // r15 脚掌
+];
+// 跑步第二帧：双腿错开
+const NAIWA_RUNB = NAIWA_BODY.slice();
+NAIWA_RUNB[14] = ".....yy...yy....";
+NAIWA_RUNB[15] = "....ppp...ppp...";
+// 空中帧：双腿收起
+const NAIWA_JUMP = NAIWA_BODY.slice();
+NAIWA_JUMP[13] = "....yyyyyy......";
+NAIWA_JUMP[14] = ".....pppp.......";
+NAIWA_JUMP[15] = "................";
+const NAIWA_SPR = { runA: NAIWA_BODY, runB: NAIWA_RUNB, jump: NAIWA_JUMP };
+
 /* ================= 形象（皮肤）系统 =================
    奶龙 = 初始形象；雪王 = 进阶模式最高分达 6000 解锁 */
 const SNOWKING_PAL = {
@@ -1060,6 +1098,36 @@ LION_JUMP[14] = "mm...yyyyyy.....";
 LION_JUMP[15] = "................";
 const LION_SPR = { runA: LION_BODY, runB: LION_RUNB, jump: LION_JUMP };
 
+/* ---- 坤哥（公鸡）：红鸡冠 + 白羽头 + 黄喙红肉垂 + 蓝色背带裤 + 墨绿尾羽（朝右） ----
+   ★ 每行必须恰好16字符 */
+const KUNGE_PAL = { "r": "#e03a2e", "w": "#fdf3e0", "k": "#161616", "y": "#f0a030", "b": "#3a6fd0", "t": "#2a5a44" };
+const KUNGE_BODY = [
+  ".....rrrr.......",    // r0 鸡冠尖
+  "....rrrrrr......",    // r1 鸡冠
+  "....wwwwww......",    // r2 头顶
+  "...wwwwwwwww....",    // r3 头
+  "...wwkwwwwyyy...",    // r4 眼 + 喙
+  "...wwwwwwwyy....",    // r5 喙
+  "...wwwwwwwrr....",    // r6 红肉垂
+  "tt.wwwwwwww.....",    // r7 尾羽起 + 白背心
+  "tttwwwwwwwww....",    // r8
+  "tttwwbwwwbww....",    // r9 背带（两条蓝肩带）
+  "tt.bbbbbbbbb....",    // r10 背带裤
+  "tt.bbbbbbbbb....",    // r11
+  ".t.bbbbbbbbb....",    // r12
+  "...bbbbbbbbb....",    // r13
+  "...bb...bb......",    // r14 裤腿
+  "...yy...yy......"     // r15 脚掌
+];
+// 跑步第二帧：脚掌错开
+const KUNGE_RUNB = KUNGE_BODY.slice();
+KUNGE_RUNB[15] = "....yy...yy.....";
+// 空中帧：收脚收尾
+const KUNGE_JUMP = KUNGE_BODY.slice();
+KUNGE_JUMP[14] = "....bbbb........";
+KUNGE_JUMP[15] = "................";
+const KUNGE_SPR = { runA: KUNGE_BODY, runB: KUNGE_RUNB, jump: KUNGE_JUMP };
+
 const SKINS = {
   nailong: {
     name: "奶龙", need: 0, spr: SPR, pal: NAILONG_PAL,
@@ -1069,6 +1137,24 @@ const SKINS = {
     dead: { col: "#6e3a12",
             x: [[0,-26],[2,-24],[4,-22],[6,-20],[8,-18],[8,-26],[6,-24],[4,-22],[2,-20],[0,-18]],
             mouth: { r: [2, -17, 10, 5], inner: [4, -15, 6, 3] } }
+  },
+  naiwa: {
+    name: "奶娃", need: 0, spr: NAIWA_SPR, pal: NAILONG_PAL,          // 头小身胖腿长的幼崽造型，初始解锁
+    skillDesc: ["跳跃后开始滑翔", "以较慢的速度降落"],
+    pc: ["#ffc93c", "#efa01e"],                                     // 死亡碎片颜色
+    blink: { fill: "#ffc93c", line: "#6e3a12", r: [-2, -28, 8, 4], l: [-1, -26, 6, 1] },
+    dead: { col: "#6e3a12",
+            x: [[-4,-30],[-2,-28],[0,-26],[2,-24],[4,-22],[4,-30],[2,-28],[0,-26],[-2,-24],[-4,-22]],
+            mouth: { r: [-4, -24, 4, 4], inner: [-3, -23, 2, 2] } }
+  },
+  kunge: {
+    name: "坤哥", need: 2500, spr: KUNGE_SPR, pal: KUNGE_PAL,
+    skillDesc: ["子弹替换为篮球", "命中判定范围更大"],
+    pc: ["#e03a2e", "#3a6fd0"],                                   // 死亡碎片颜色
+    blink: { fill: "#fdf3e0", line: "#4a3828", r: [-7, -25, 4, 4], l: [-6, -23, 3, 1] },
+    dead: { col: "#161616",
+            x: [[-7,-25],[-5,-23],[-3,-21],[-3,-25],[-7,-21]],
+            mouth: null }                                          // 喙就是嘴
   },
   snowking: {
     name: "雪王", need: 6000, spr: SNOWKING_SPR, pal: SNOWKING_PAL,
@@ -1100,12 +1186,14 @@ const SKINS = {
 };
 let skin = localStorage.getItem("nailong_skin") || "nailong";
 if (!SKINS[skin]) skin = "nailong";
-// 形象面板卡片点击区（四卡横排）
+// 形象面板卡片点击区（两行三列，按解锁分数排序；120×86，恰好利用面板空间）
 const SKIN_CARD = {
-  nailong:  { x: 45,  y: 54, w: 90, h: 118 },
-  snowking: { x: 145, y: 54, w: 90, h: 118 },
-  pacman:   { x: 245, y: 54, w: 90, h: 118 },
-  lion:     { x: 345, y: 54, w: 90, h: 118 }
+  nailong:  { x: 48,  y: 56,  w: 120, h: 86 },
+  naiwa:    { x: 180, y: 56,  w: 120, h: 86 },
+  kunge:    { x: 312, y: 56,  w: 120, h: 86 },
+  snowking: { x: 48,  y: 146, w: 120, h: 86 },
+  pacman:   { x: 180, y: 146, w: 120, h: 86 },
+  lion:     { x: 312, y: 146, w: 120, h: 86 }
 };
 
 /* ---- 形象技能运行时状态（resetGame 重置） ---- */
@@ -1178,6 +1266,16 @@ function drawNailong() {
   ctx.translate(ax, ay);
   if (angle) ctx.rotate(angle);
   ctx.scale(sx, sy);
+  // 奶娃技能：滑翔（空中下落）时背后长出一对小翅膀，两帧扇动
+  if (skin === "naiwa" && !player.grounded && !player.dead && player.vy > 0) {
+    const up = Math.floor(now / 120) % 2 === 0;         // 扇动节奏
+    const wy = up ? -18 : -14;                          // 翅根高度随帧上下
+    px(-16, wy, 4, 3, "#fff6e0");
+    px(-20, wy - 3, 5, 3, "#fff6e0");
+    px(-24, wy - 6, 5, 3, "#fff6e0");
+    px(-20, wy - 2, 5, 1, "#e8d9b8");                   // 翅羽阴影
+    px(-24, wy - 5, 5, 1, "#e8d9b8");
+  }
   drawSprite(map, -16, -32, 2, SK.pal);
 
   // 眨眼：色块盖住眼睛，留一条闭眼线（坐标随形象不同）
@@ -1412,7 +1510,7 @@ let showInfo = false;    // 详情面板是否展开
 let showSkins = false;   // 分数奖励（形象）面板是否展开
 let showSkill = null;    // 正在查看技能说明的形象 id（null=未打开）
 // 形象卡片底部「技能」小按钮的点击区（随卡片布局）
-function skillBtnRect(id) { const b = SKIN_CARD[id]; return { x: b.x + (b.w - 52) / 2, y: b.y + 102, w: 52, h: 13 }; }
+function skillBtnRect(id) { const b = SKIN_CARD[id]; return { x: b.x + (b.w - 52) / 2, y: b.y + 72, w: 52, h: 13 }; }
 
 function drawButton(b, hover) {
   const c = hover ? "#ffe278" : C.btn;
@@ -1436,6 +1534,17 @@ function drawPickup(sx, y, t) {
 }
 /* 飞行弹药：黄白小弹丸 + 尾迹 */
 function drawProjectile(p) {
+  if (p.ball) {
+    // 坤哥技能：篮球（16×14，圆角球体 + 深色十字缝线 + 高光）
+    px(p.x + 3, p.y, 10, 14, "#d9722e");
+    px(p.x, p.y + 3, 16, 8, "#d9722e");
+    px(p.x + 3, p.y, 10, 1, "#a8521a");         // 顶部暗边
+    px(p.x + 3, p.y + 13, 10, 1, "#a8521a");    // 底部暗边
+    px(p.x + 7, p.y, 2, 14, "#4a2410");         // 竖缝
+    px(p.x, p.y + 6, 16, 2, "#4a2410");         // 横缝
+    px(p.x + 4, p.y + 2, 3, 3, "#f2a55a");      // 高光
+    return;
+  }
   px(p.x - 5, p.y + 1, 5, 2, "rgba(255,220,120,.5)");
   px(p.x, p.y, 8, 4, "#ffd23f");
   px(p.x + 5, p.y, 3, 4, "#fff3c0");
@@ -1588,7 +1697,13 @@ function render() {
         for (let i = 0; i < 3; i++) {
           const ax = 12 + i * 12, ay = 44;
           if (i < ammo) {
-            px(ax + 1, ay, 6, 8, "#c9a227"); px(ax + 2, ay - 2, 4, 2, "#d96b4a"); px(ax + 2, ay, 1, 7, "#f0d060");
+            if (skin === "kunge") {
+              // 坤哥：迷你篮球
+              px(ax + 1, ay - 2, 6, 8, "#d9722e"); px(ax, ay, 8, 4, "#d9722e");
+              px(ax + 3, ay - 2, 1, 8, "#4a2410"); px(ax, ay + 1, 8, 1, "#4a2410");
+            } else {
+              px(ax + 1, ay, 6, 8, "#c9a227"); px(ax + 2, ay - 2, 4, 2, "#d96b4a"); px(ax + 2, ay, 1, 7, "#f0d060");
+            }
           } else {
             px(ax + 1, ay, 6, 8, "rgba(0,0,0,.25)");
           }
@@ -1620,10 +1735,19 @@ function render() {
       ctx.strokeStyle = ammo > 0 ? "#ffd23f" : "rgba(255,210,63,.35)";
       ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(bx, by, br, 0, 7); ctx.stroke();
-      // 子弹图标
-      px(bx - 9 * k, by - 3 * k, 12 * k, 6 * k, ammo > 0 ? "#c9a227" : "rgba(201,162,39,.4)");
-      px(bx + 3 * k, by - 2 * k, 5 * k, 4 * k, ammo > 0 ? "#d96b4a" : "rgba(217,107,74,.4)");
-      px(bx - 7 * k, by - 2 * k, 2 * k, 4 * k, ammo > 0 ? "#f0d060" : "rgba(240,208,96,.4)");
+      // 弹药图标（坤哥 = 篮球，其余 = 子弹）
+      if (skin === "kunge") {
+        const bc = ammo > 0 ? "#d9722e" : "rgba(217,114,46,.4)";
+        const sc = ammo > 0 ? "#4a2410" : "rgba(74,36,16,.4)";
+        px(bx - 5 * k, by - 6 * k, 10 * k, 12 * k, bc);
+        px(bx - 6 * k, by - 4 * k, 12 * k, 8 * k, bc);
+        px(bx - 1 * k, by - 6 * k, 2 * k, 12 * k, sc);   // 竖缝
+        px(bx - 6 * k, by - 1 * k, 12 * k, 2 * k, sc);   // 横缝
+      } else {
+        px(bx - 9 * k, by - 3 * k, 12 * k, 6 * k, ammo > 0 ? "#c9a227" : "rgba(201,162,39,.4)");
+        px(bx + 3 * k, by - 2 * k, 5 * k, 4 * k, ammo > 0 ? "#d96b4a" : "rgba(217,107,74,.4)");
+        px(bx - 7 * k, by - 2 * k, 2 * k, 4 * k, ammo > 0 ? "#f0d060" : "rgba(240,208,96,.4)");
+      }
     }
   }
 
@@ -1706,10 +1830,10 @@ function render() {
     px(ix, iy, 3, ih, C.panelE);
     px(ix + iw - 3, iy, 3, ih, C.panelE);
 
-    pixelText("分数奖励 · 形象", W / 2, iy + 10, 20, "#ffd23f", "center", false);
-    pixelText("进阶模式最高分解锁新形象", W / 2, iy + 30, 11, "#9fd8ff", "center");
+    pixelText("分数奖励 · 形象", W / 2, iy + 6, 20, "#ffd23f", "center", false);
+    pixelText("进阶模式最高分解锁新形象", W / 2, iy + 28, 11, "#9fd8ff", "center");
 
-    for (const id of ["nailong", "snowking", "pacman", "lion"]) {
+    for (const id of ["nailong", "naiwa", "kunge", "snowking", "pacman", "lion"]) {
       const sk = SKINS[id], b = SKIN_CARD[id];
       const sel = skin === id, unl = bestHard >= sk.need;
       // 卡片底 + 选中金边
@@ -1719,19 +1843,18 @@ function render() {
         px(b.x, b.y, b.w, 3, "#ffd23f"); px(b.x, b.y + b.h - 3, b.w, 3, "#ffd23f");
         px(b.x, b.y, 3, b.h, "#ffd23f"); px(b.x + b.w - 3, b.y, 3, b.h, "#ffd23f");
       }
-      // 形象预览（3 倍放大；未解锁半透明剪影）
+      // 形象预览（2 倍放大；未解锁半透明剪影）
       ctx.globalAlpha = unl ? 1 : 0.25;
-      drawSprite(sk.spr.runA, b.x + b.w / 2 - 24, b.y + 4, 3, sk.pal);
+      drawSprite(sk.spr.runA, b.x + b.w / 2 - 16, b.y + 2, 2, sk.pal);
       ctx.globalAlpha = 1;
-      pixelText(sk.name, b.x + b.w / 2, b.y + 56, 14, sel ? "#ffe873" : "#e8e2ff", "center", false);
+      pixelText(sk.name, b.x + b.w / 2, b.y + 35, 14, sel ? "#ffe873" : "#e8e2ff", "center", false);
       if (unl) {
-        pixelText(sel ? "✓ 使用中" : "点击使用", b.x + b.w / 2, b.y + 76, 11, sel ? "#ffe873" : "#9fd8ff", "center");
+        pixelText(sel ? "✓ 使用中" : "点击使用", b.x + b.w / 2, b.y + 52, 11, sel ? "#ffe873" : "#9fd8ff", "center");
       } else {
-        pixelText("🔒 未解锁", b.x + b.w / 2, b.y + 72, 11, "#ff9aa9", "center");
-        pixelText(bestHard + "/" + sk.need, b.x + b.w / 2, b.y + 84, 9, "#cfc6f2", "center");
+        pixelText("🔒 " + bestHard + "/" + sk.need, b.x + b.w / 2, b.y + 51, 11, "#ff9aa9", "center");
         const pw2 = b.w - 24, pr = Math.min(1, bestHard / sk.need);
-        px(b.x + 12, b.y + 92, pw2, 5, "#1b1436");
-        px(b.x + 12, b.y + 92, Math.round(pw2 * pr), 5, "#ffd23f");
+        px(b.x + 12, b.y + 65, pw2, 4, "#1b1436");
+        px(b.x + 12, b.y + 65, Math.round(pw2 * pr), 4, "#ffd23f");
       }
       // 「技能」小按钮：点击弹出该形象的技能说明
       const sb = skillBtnRect(id);
@@ -1843,7 +1966,7 @@ function pressAt(p) {
       // 形象面板：点「技能」按钮看技能说明，点卡片即换装（面板保持打开），点空白处关闭
       if (showSkins) {
         let onCard = false;
-        for (const id of ["nailong", "snowking", "pacman", "lion"]) {
+        for (const id of ["nailong", "naiwa", "kunge", "snowking", "pacman", "lion"]) {
           if (hit(p, skillBtnRect(id))) {
             sfxClick();
             showSkill = id;
