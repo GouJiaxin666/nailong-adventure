@@ -492,7 +492,8 @@ function storeGet(k) { try { return localStorage.getItem(k); } catch (e) { retur
 function storeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 function loadLab() {
   const d = { stone: STONE_START, mat: 0, owned: {}, lv: {}, pityAny: 0, pityLtd: 0,
-              wkKey: "", wkStone: 0, dayKey: "", dayKills: 0, dayDone: false, gachaGift: false };
+              wkKey: "", wkStone: 0, dayKey: "", dayKills: 0, dayDone: false, gachaGift: false,
+              rookie: { gacha: 0, waves: 0, kills: 0, ups: 0, bestLv: 0, claim: {} } };   // 新手任务进度/领取标记
   for (const t of TRAPS) { d.owned[t.id] = LAB_INIT_OWNED.includes(t.id); d.lv[t.id] = 1; }
   let s = null;
   try { s = JSON.parse(storeGet(LAB_SAVE_KEY) || "null"); } catch (e) { s = null; }
@@ -502,6 +503,12 @@ function loadLab() {
     d.wkKey = s.wkKey || ""; d.wkStone = Math.max(0, s.wkStone | 0);                // 战斗奶石：周上限计数
     d.dayKey = s.dayKey || ""; d.dayKills = Math.max(0, s.dayKills | 0);            // 每日任务：日期/击杀/完成
     d.dayDone = !!s.dayDone; d.gachaGift = !!s.gachaGift;                           // 抽卡首进赠送标记
+    if (s.rookie) {                                                                 // 新手任务进度（旧存档默认0）
+      const r = s.rookie;
+      d.rookie.gacha = Math.max(0, r.gacha | 0); d.rookie.waves = Math.max(0, r.waves | 0);
+      d.rookie.kills = Math.max(0, r.kills | 0); d.rookie.ups = Math.max(0, r.ups | 0);
+      d.rookie.bestLv = Math.max(0, r.bestLv | 0); d.rookie.claim = r.claim || {};
+    }
     for (const t of TRAPS) {
       if (s.owned && t.id in s.owned) d.owned[t.id] = !!s.owned[t.id];   // 存档为准；未来新机关默认未拥有
       if (s.lv && s.lv[t.id] >= 1) d.lv[t.id] = Math.min(TRAP_LV_MAX, s.lv[t.id] | 0);
@@ -530,7 +537,7 @@ const canUpgrade = id => lab.owned[id] && (lab.lv[id] || 1) < TRAP_LV_MAX && lab
 function upgradeTrap(id) {
   if ((lab.lv[id] || 1) >= TRAP_LV_MAX) { hint("已满级"); return false; }
   if (!canUpgrade(id)) { hint("材料不足"); return false; }
-  lab.mat -= upCostOf(id); lab.lv[id] = (lab.lv[id] || 1) + 1; saveLab();
+  lab.mat -= upCostOf(id); lab.lv[id] = (lab.lv[id] || 1) + 1; lab.rookie.ups++; saveLab();   // rookie.ups：新手任务
   return true;
 }
 /* 抽卡 */
@@ -553,7 +560,7 @@ function rollGachaOnce() {          // 返回 {type:"trap",id} 或 {type:"mat",n
 }
 function drawGacha(times) {
   if (lab.stone < DRAW_COST * times) { hint("奶石不足"); return false; }
-  lab.stone -= DRAW_COST * times;
+  lab.stone -= DRAW_COST * times; lab.rookie.gacha += times;           // rookie.gacha：新手任务（累计抽卡）
   const items = [];
   for (let i = 0; i < times; i++) {
     const p = rollGachaOnce();
@@ -577,7 +584,7 @@ function drawGacha(times) {
 /* ---- 奶石获取：战斗结算 / 每日任务 ---- */
 const weekKey = () => { const d = new Date(), o = new Date(d.getFullYear(), 0, 1); return d.getFullYear() + "w" + (((d - o) / 6048e5) | 0); };
 const dayKey = () => new Date().toDateString();
-let endReward = 0, endTaskReward = 0;        // 本局结算所得（结算面板展示用）
+let endReward = 0;                           // 本局结算所得奶石（结算面板展示用）
 function battleStone(win) {                  // 战斗结算奶石：负=当前波未通过，胜=全部通过
   const passed = win ? waveIdx : waveIdx - 1;
   return passed < 10 ? 0 : Math.min(BATTLE_STONE_CAP, 20 + (passed - 10) * 10);
@@ -589,15 +596,49 @@ function applyEndRewards(win) {
   lab.wkStone += endReward; lab.stone += endReward;
   const dk = dayKey();
   if (lab.dayKey !== dk) { lab.dayKey = dk; lab.dayKills = 0; lab.dayDone = false; } // 日重置
-  lab.dayKills += kills; endTaskReward = 0;
-  if (!lab.dayDone && lab.dayKills >= DAY_KILL_NEED) {                             // 每日任务：消灭50敌人
-    lab.dayDone = true; endTaskReward = DAY_KILL_STONE; lab.stone += DAY_KILL_STONE;
-  }
+  lab.dayKills += kills;                                     // 每日任务进度（改为任务页领取，不再自动发放）
+  lab.rookie.waves += Math.max(0, win ? waveIdx : waveIdx - 1);   // rookie.waves：新手任务（累计通过波次）
   saveLab();
 }
 
+/* ---- 任务系统：每日任务（领取制） + 新手任务（仅可领取一次） ---- */
+const TASK_ROOKIE = [
+  { id: "gacha40", name: "累计抽卡 40 次",          need: 40,  reward: 300, prog: () => lab.rookie.gacha },
+  { id: "wave15",  name: "累计通过 15 个波次",      need: 15,  reward: 300, prog: () => lab.rookie.waves },
+  { id: "kill100", name: "累计消灭 100 个敌人",     need: 100, reward: 300, prog: () => lab.rookie.kills },
+  { id: "up1",     name: "为机关升级 1 次",         need: 1,   reward: 300, prog: () => lab.rookie.ups },
+  { id: "lv10",    name: "守卫等级达到 10 级一次",  need: 10,  reward: 300, prog: () => lab.rookie.bestLv },
+  { id: "own5",    name: "拥有 5 种不同的机关",     need: 5,   reward: 300, prog: () => TRAPS.filter(t => lab.owned[t.id]).length },
+  { id: "all",     name: "完成其他新手任务",        need: 6,   reward: 600, prog: () => TASK_ROOKIE.slice(0, 6).filter(t => lab.rookie.claim[t.id]).length }
+];
+/* 行数据（绘制与点击共用），st: 0 未达成 / 1 可领取 / 2 已领取 */
+function taskRows() {
+  const dk = dayKey();                                              // 跨日自动重置每日任务
+  if (lab.dayKey !== dk) { lab.dayKey = dk; lab.dayKills = 0; lab.dayDone = false; saveLab(); }
+  const rows = [{ kind: "daily", name: `消灭 ${DAY_KILL_NEED} 个敌人`,
+    prog: Math.min(lab.dayKills, DAY_KILL_NEED), need: DAY_KILL_NEED, reward: DAY_KILL_STONE,
+    st: lab.dayDone ? 2 : lab.dayKills >= DAY_KILL_NEED ? 1 : 0 }];
+  for (const def of TASK_ROOKIE) rows.push({ kind: "rookie", def, name: def.name,
+    prog: Math.min(def.prog(), def.need), need: def.need, reward: def.reward,
+    st: lab.rookie.claim[def.id] ? 2 : def.prog() >= def.need ? 1 : 0 });
+  return rows;
+}
+const taskRowRect = i => i === 0 ? { x: W / 2 - 360, y: 94, w: 720, h: 52 }
+                                 : { x: W / 2 - 360, y: 188 + (i - 1) * 60, w: 720, h: 52 };
+const taskBtnRect = r => ({ x: r.x + r.w - 124, y: r.y + 8, w: 112, h: 36 });
+function claimDaily() {
+  if (lab.dayDone || lab.dayKills < DAY_KILL_NEED) return;
+  lab.dayDone = true; lab.stone += DAY_KILL_STONE; saveLab();
+  giftPop = { title: "每日任务奖励", amount: DAY_KILL_STONE, sub: `消灭 ${DAY_KILL_NEED} 个敌人` };
+}
+function claimRookie(def) {
+  if (lab.rookie.claim[def.id] || def.prog() < def.need) return;
+  lab.rookie.claim[def.id] = true; lab.stone += def.reward; saveLab();
+  giftPop = { title: "新手任务奖励", amount: def.reward, sub: def.name };
+}
+
 /* ================= 游戏状态 ================= */
-const ST = { MENU: 0, LOADOUT: 1, PLAY: 2, STRAT: 3, WIN: 4, LOSE: 5, LAB: 6 };
+const ST = { MENU: 0, LOADOUT: 1, PLAY: 2, STRAT: 3, WIN: 4, LOSE: 5, LAB: 6, TASK: 7 };
 let state = ST.MENU;
 
 let CUR = parseMap(MAPS[0]);          // 当前地图（解析后）
@@ -657,7 +698,10 @@ function drawStratOptions() {
 function gainExp(n) {
   if (lv >= LV_MAX) return;
   exp += n;
-  while (lv < LV_MAX && exp >= expNeed()) { exp -= expNeed(); lv++; pendingStrats++; }
+  while (lv < LV_MAX && exp >= expNeed()) {
+    exp -= expNeed(); lv++; pendingStrats++;
+    if (lv > lab.rookie.bestLv) lab.rookie.bestLv = lv;   // rookie.bestLv：新手任务（守卫达10级一次）
+  }
 }
 function pickStrat(opt) {
   if (!opt) return;
@@ -751,7 +795,7 @@ function spawnEnemy(q) {
 function hurtEnemy(e, dmg) {
   e.hp -= dmg; e.flash = 0.1;
   if (e.hp <= 0 && !e.dead) {
-    e.dead = true; kills++;
+    e.dead = true; kills++; lab.rookie.kills++;        // rookie.kills：新手任务（累计消灭），随结算落盘
     gainExp(e.base.exp);
     fx.push({ type: "burst", x: e.x + e.jx, y: e.y + e.jy, ttl: 0.4, color: e.base.color || "#c060ff" });
   }
@@ -895,8 +939,9 @@ function update(dt) {
 const IS_TOUCH = "ontouchstart" in window || navigator.maxTouchPoints > 0;
 const HUB_BTN = IS_TOUCH ? { x: 14, y: 14, w: 112, h: 36, label: "← 游戏大厅" }
                          : { x: 12, y: 12, w: 88,  h: 26, label: "← 游戏大厅" };
-const BTN_MENU_START = { x: W / 2 - 190, y: 420, w: 180, h: 48 };
-const BTN_MENU_LAB   = { x: W / 2 + 10,  y: 420, w: 180, h: 48 };
+const BTN_MENU_START = { x: W / 2 - 290, y: 420, w: 180, h: 48 };
+const BTN_MENU_LAB   = { x: W / 2 - 90,  y: 420, w: 180, h: 48 };
+const BTN_MENU_TASK  = { x: W / 2 + 110, y: 420, w: 180, h: 48 };
 const BTN_LO_GO   = { x: W / 2 + 21,  y: 452, w: 168, h: 46 };
 const BTN_LO_BACK = { x: W / 2 - 189, y: 452, w: 140, h: 46 };
 const BTN_END_AGAIN = { x: W / 2 - 160, y: 336, w: 140, h: 44 };
@@ -966,6 +1011,7 @@ function onPointerDown(p) {
     if (hitR(p, HUB_BTN)) { location.href = "../index.html"; return; }
     if (hitR(p, BTN_MENU_START)) { state = ST.LOADOUT; return; }
     if (hitR(p, BTN_MENU_LAB)) { state = ST.LAB; labResult = null; return; }
+    if (hitR(p, BTN_MENU_TASK)) { state = ST.TASK; return; }
   } else if (state === ST.LOADOUT) {
     if (hitR(p, HUB_BTN)) { location.href = "../index.html"; return; }
     if (hitR(p, BTN_LO_BACK)) { state = ST.MENU; return; }
@@ -1018,6 +1064,15 @@ function onPointerDown(p) {
   } else if (state === ST.WIN || state === ST.LOSE) {
     if (hitR(p, BTN_END_AGAIN)) { state = ST.LOADOUT; return; }
     if (hitR(p, BTN_END_HUB)) { location.href = "../index.html"; return; }
+  } else if (state === ST.TASK) {
+    if (hitR(p, BTN_LAB_BACK)) { state = ST.MENU; return; }
+    const rows = taskRows();
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].st === 1 && hitR(p, taskBtnRect(taskRowRect(i)))) {
+        rows[i].kind === "daily" ? claimDaily() : claimRookie(rows[i].def);
+        return;
+      }
+    }
   }
 }
 
@@ -1058,7 +1113,7 @@ canvas.addEventListener("wheel", e => {                            // 桌面端�
 
 addEventListener("keydown", e => {
   if (e.code === "Escape") {
-    if (state === ST.LOADOUT || state === ST.WIN || state === ST.LOSE || state === ST.LAB) state = ST.MENU;
+    if (state === ST.LOADOUT || state === ST.WIN || state === ST.LOSE || state === ST.LAB || state === ST.TASK) state = ST.MENU;
   } else if (state === ST.PLAY) {
     if (e.code.startsWith("Digit")) {
       const i = +e.code.slice(5) - 1;
@@ -1102,6 +1157,7 @@ function drawMenu() {
   pixelText("敌人沿固定路线来袭 · 机关可阻挡 · 升级三选一战略", W / 2, 316, 13, "#8f83c0", "center");
   drawBtn(BTN_MENU_START, "开始游戏", C.btn, C.btnText, 20);
   drawBtn(BTN_MENU_LAB, "研发所", "#9fd8ff", "#0e2a4a", 20);
+  drawBtn(BTN_MENU_TASK, "任务", "#7cff6b", "#0e3a1a", 20);
   pixelText("游戏集 · 第三个游戏", W / 2, 492, 12, "#6f5fa8", "center", false);
   drawTopBtn(HUB_BTN);
 }
@@ -1477,9 +1533,10 @@ function drawEnd(win) {
   pixelText(endReward > 0 ? `奶石 +${endReward}（本周 ${lab.wkStone}/${WEEK_STONE_MAX}）`
     : (passed < 10 ? "奶石 +0（通过 10 波起可获得）" : `奶石 +0（本周上限 ${WEEK_STONE_MAX} 已达）`),
     W / 2, 300, 13, "#ffc7e6", "center", false);
-  pixelText(endTaskReward > 0 ? `每日任务完成！奶石 +${endTaskReward}`
-    : `每日任务：消灭敌人 ${lab.dayDone ? DAY_KILL_NEED : Math.min(lab.dayKills, DAY_KILL_NEED)}/${DAY_KILL_NEED}` + (lab.dayDone ? " ✓" : ""),
-    W / 2, 322, 12, endTaskReward > 0 ? "#7cff6b" : "#8f83c0", "center", false);
+  pixelText(lab.dayDone ? `每日任务：消灭敌人 ${DAY_KILL_NEED}/${DAY_KILL_NEED} 已领取 ✓`
+    : lab.dayKills >= DAY_KILL_NEED ? "每日任务已达成，前往任务页领取奖励！"
+    : `每日任务：消灭敌人 ${Math.min(lab.dayKills, DAY_KILL_NEED)}/${DAY_KILL_NEED}`,
+    W / 2, 322, 12, lab.dayDone || lab.dayKills >= DAY_KILL_NEED ? "#7cff6b" : "#8f83c0", "center", false);
   drawBtn(BTN_END_AGAIN, "再来一局", C.btn, C.btnText, 17);
   drawBtn(BTN_END_HUB, "返回大厅", "#ff9aa9", "#5a1020", 17);
 }
@@ -1596,9 +1653,33 @@ function render() {
   else if (state === ST.PLAY) drawPlay();
   else if (state === ST.STRAT) drawStrat();
   else if (state === ST.LAB) drawLab();
+  else if (state === ST.TASK) drawTask();
   else if (state === ST.WIN) drawEnd(true);
   else if (state === ST.LOSE) drawEnd(false);
   if (giftPop) drawGiftPop();              // 赠送弹窗覆盖在最上层
+}
+/* ---- 任务页：每日任务（领取制） + 新手任务 ---- */
+function drawTaskRow(rw, i) {
+  const r = taskRowRect(i);
+  drawPanel(r.x, r.y, r.w, r.h);
+  pixelText(rw.name, r.x + 16, r.y + 7, 14, "#fff", "left", false);
+  pixelText(`进度 ${rw.prog}/${rw.need}`, r.x + 16, r.y + 29, 11, "#8f83c0", "left", false);
+  pixelText(`奶石×${rw.reward}`, r.x + r.w - 140, r.y + 18, 12, "#ffc7e6", "right", false);
+  drawBtn(taskBtnRect(r), rw.st === 2 ? "已领取" : rw.st === 1 ? "领取" : "未达成",
+    rw.st === 2 ? "#3a3355" : rw.st === 1 ? C.btn : "#554a7a",
+    rw.st === 2 ? "#6f5fa8" : rw.st === 1 ? C.btnText : "#8f83c0", 15);
+}
+function drawTask() {
+  px(0, 0, W, H, "#171130");
+  drawTopBtn(BTN_LAB_BACK);
+  pixelText("任务", W / 2, 14, 26, "#ffd23f", "center");
+  drawLabCurrency();
+  const rows = taskRows();
+  pixelText("每日任务（每日刷新，可重复领取）", W / 2 - 360, 70, 14, "#9fd8ff", "left", false);
+  drawTaskRow(rows[0], 0);
+  pixelText("新手任务（仅可领取一次）", W / 2 - 360, 164, 14, "#9fd8ff", "left", false);
+  for (let i = 1; i < rows.length; i++) drawTaskRow(rows[i], i);
+  if (hintT > 0) pixelText(hintMsg, W / 2, H - 10, 14, "#ff9aa9", "center");
 }
 function drawGiftPop() {        // 首次赠送奶石弹窗（点击任意处收下）
   ctx.globalAlpha = 0.78; px(0, 0, W, H, "#0d0a1f"); ctx.globalAlpha = 1;
