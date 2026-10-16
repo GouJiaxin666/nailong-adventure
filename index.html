@@ -108,6 +108,12 @@
       <p>横板闯关 · 平台跳跃<br>先吃蛋糕再回家</p>
       <span class="tag">闯关</span>
     </a>
+    <a class="card" href="baowei/index.html">
+      <canvas class="preview" id="pv3" width="26" height="26"></canvas>
+      <h2>奶龙保卫战</h2>
+      <p>Roguelike 塔防 · 建造机关<br>抵御敌人守护奶龙</p>
+      <span class="tag">塔防</span>
+    </a>
     <div class="card soon">
       <div class="q">?</div>
       <h2>更多游戏</h2>
@@ -171,8 +177,24 @@ const CAKE = [
   "bbbbbbbbbbbb",
   "bbbbbbbbbbbb"
 ];
+const SHIELD_PAL = { "s": "#b8c4d0", "y": "#ffd23f", "d": "#7d8a99" };
+const SHIELD = [
+  "....ssss....",
+  "..ssssssss..",
+  ".ssyyyyyyss.",
+  "ssyyyyyyyyss",
+  "ssyyyddyyyss",
+  "ssyyyddyyyss",
+  "ssyyyyyyyyss",
+  ".ssyyyyyyss.",
+  "..ssyyyyss..",
+  "...ssyyss...",
+  "....ssss....",
+  ".....ss....."
+];
 drawMap(document.getElementById("pv1"), NAILONG, NAILONG_PAL, 1.4);
 drawMap(document.getElementById("pv2"), CAKE, CAKE_PAL, 2.1);
+drawMap(document.getElementById("pv3"), SHIELD, SHIELD_PAL, 2.1);
 </script>
 </body>
 </html>

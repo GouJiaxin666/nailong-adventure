@@ -1,0 +1,1627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>奶龙保卫战</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #1b1436;
+    overflow: hidden;
+    font-family: "Courier New", monospace;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at 50% 20%, #34255f 0%, #1b1436 70%);
+  }
+  #wrap {
+    position: relative;
+    flex-shrink: 0;   /* 禁止 flex 压缩画布（移动端适配由 JS 精确控制） */
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    border: 4px solid #0d0a1f;
+    border-radius: 6px;
+    box-shadow: 0 0 0 4px #4a3a86, 0 18px 50px rgba(0,0,0,.6);
+    touch-action: none;
+    background: #171130;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="1152" height="648"></canvas>
+</div>
+
+<script>
+"use strict";
+/* =====================================================================
+   奶龙保卫战 —— Roguelike + 塔防（游戏集 · 第三个游戏）
+   玩法：敌人从出生点沿固定路线向奶龙行进；玩家在格子上建造机关抵御，
+   路线上的机关可阻挡敌人；敌人进入奶龙格 → 奶龙生命 -1，归零失败。
+   养成：击败敌人得守卫经验，升级（lv.1~lv.10）时三选一战略；
+   奶龙币初始 100，每秒 +10，上限 900，拆除机关返还 50%。
+   当前为框架版：地图 / 建造 / 经济 / 战斗引擎 / 升级与战略系统均已就绪，
+   敌人与机关图鉴暂时为空，等待后续更新加入。
+   ===================================================================== */
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+ctx.imageSmoothingEnabled = false;
+
+const W = 1152, H = 648;
+
+/* ================= 网格布局 ================= */
+const CELL = 48, COLS = 12, ROWS = 10;          // 12×10 格，每格 48px → 576×480
+const GRID_OX = 288, GRID_OY = 72;              // 网格原点（顶部 HUD 64px，底部机关栏 556..648，两侧 240px 信息面板）
+const BAR_Y = 556;
+const AIR_LIFT = 10;                            // 飞行敌人贴图相对路线中心的上浮高度
+
+/* ================= 经济 / 养成常量 ================= */
+const COIN_START = 100;      // 初始奶龙币
+const COIN_RATE  = 10;       // 每秒产出
+const COIN_MAX   = 900;      // 奶龙币上限
+const SELL_BACK  = 0.5;      // 拆除返还比例
+const LV_MAX     = 10;       // 守卫等级上限
+const LIFE_START = 10;       // 奶龙生命（地图可覆盖）
+
+/* ================= 调色板 ================= */
+const C = {
+  grass:  "#7cc353", grassD: "#6fb048",
+  path:   "#937450", pathD:  "#8a6b45",
+  panel:  "#241b47", panelE: "#ffd23f",
+  btn:    "#ffd23f", btnD:   "#c98a1e", btnText: "#3a2500",
+  home:   "#d0443c", danger: "#e33b4e"
+};
+
+/* ================= 奶龙像素精灵（16×16，复用自跑酷/蛋糕） ================= */
+const NAILONG_PAL = {
+  "#": "#8a4513", "y": "#ffc93c", "o": "#efa01e", "b": "#fff0c6",
+  "w": "#ffffff", "g": "#4aa64f", "d": "#1c6b33", "k": "#161616",
+  "p": "#96501f", "m": "#6e3a12"
+};
+const NAILONG_BODY = [
+  ".......###......",
+  ".....#yyyy#.....",
+  "...#yyyyyyyy#...",
+  "..#yyyyywwwww#..",
+  ".#yyyyyywgwkwy#.",
+  ".#yyyyyywggkwy#.",
+  ".#yyyyyywgkkwy#.",
+  ".#yyyyyywwwwwy#.",
+  ".#yyyyyyyymmyy#.",
+  "..##yyyyyyyyy#..",
+  "#yyyyyybbbbb#yp.",
+  "#yyyooybbbbbbb#..",
+  ".ooyyybbbbbbby#..",
+  ".#yyyyy..yyyy#..",
+  "..#yyyy..yyyy#..",
+  "...yppp..yppp..."
+];
+const NAILONG_RUNB = NAILONG_BODY.slice();
+NAILONG_RUNB[14] = "....yyyyyyyy....";
+NAILONG_RUNB[15] = ".....ypp.yppp...";
+
+/* 像素精灵绘制：把每个字符格映射成一块矩形，边界取整避免出现接缝，
+   因此放大倍数可以是任意实数（用于史莱姆的果冻挤压等非等比形变）。 */
+function drawSpriteXY(map, ox, oy, sx, sy, pal, flip) {
+  for (let r = 0; r < map.length; r++) {
+    const row = map[r], n = row.length;
+    const y0 = (oy + r * sy) | 0, y1 = (oy + (r + 1) * sy) | 0;
+    for (let c = 0; c < n; c++) {
+      const col = pal[row[flip ? n - 1 - c : c]];
+      if (col) {
+        const x0 = (ox + c * sx) | 0, x1 = (ox + (c + 1) * sx) | 0;
+        ctx.fillStyle = col; ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+      }
+    }
+  }
+}
+function drawSprite(map, ox, oy, scale, pal, flip) { drawSpriteXY(map, ox, oy, scale, scale, pal, flip); }
+function px(x, y, w, h, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x | 0, y | 0, Math.ceil(w), Math.ceil(h));
+}
+function pixelText(str, x, y, size, color, align = "left", shadow = true) {
+  ctx.font = `bold ${size}px "Courier New", monospace`;
+  ctx.textAlign = align;
+  ctx.textBaseline = "top";
+  if (shadow) { ctx.fillStyle = "rgba(0,0,0,.35)"; ctx.fillText(str, x + 2, y + 2); }
+  ctx.fillStyle = color;
+  ctx.fillText(str, x, y);
+  ctx.textAlign = "left";
+}
+function wrapText(str, maxChars) {           // 简单按字数折行（中文等宽）
+  const out = [];
+  for (let i = 0; i < str.length; i += maxChars) out.push(str.slice(i, i + maxChars));
+  return out;
+}
+
+/* ================= 实体像素精灵（机关 / 敌人） =================
+   与角色同规格：16×16 字符矩阵 + 调色板。
+   SPR 以实体 id 为键：{ body 矩阵, pal 调色板, wpal 受击白闪, scale 基础放大倍数 } */
+// 史莱姆：半球形黏黏的身体（圆顶 + 顶部高光 + 触地鼓边 + 底部滴落），趴在地上的眼嘴
+const PAL_SLIME = { "#": "#245c2a", "g": "#7cd06a", "h": "#b9ef9e", "d": "#4ea23f", "w": "#ffffff", "k": "#16301a" };
+const SLIME_BODY = [
+  "................",
+  ".......##.......",
+  ".....#gggg#.....",
+  "....#gghhgg#....",
+  "...#ghhhgggg#...",
+  "..#gghhgggggg#..",
+  ".#ggghhggggggg#.",
+  ".#ggkwggggwkgg#.",
+  ".#ggkkggggkkgg#.",
+  ".#ggggkggkgggg#.",
+  ".#gggggkkggggg#.",
+  ".#gggggggggggg#.",
+  "#dggggggggggggd#",
+  "#dddddddddddddd#",
+  "..dd........dd..",
+  "................"
+];
+// 手枪：枪口朝右，滑套 / 照门 / 枪口 / 机匣 / 扳机与护圈 / 后掠握把
+const PAL_GUN = { "#": "#1b1b24", "m": "#c8d3e0", "s": "#8e9fb4", "d": "#4a5464", "g": "#8a5a34", "k": "#2b3140" };
+const GUN_BODY = [
+  "................",
+  "................",
+  "................",
+  "....##......#...",
+  "..#mmmmmmmmmmm#.",
+  "..#mmmmmmmmmmkk.",
+  "..#mmmmmmmmmskk.",
+  "..#############.",
+  "..#gg#####......",
+  "..#gg#d..#......",
+  "..#gg#d..#......",
+  "..#gg#####......",
+  "..#gg#..........",
+  ".#gg#...........",
+  ".###............",
+  "................"
+];
+// 屏障：两侧立柱 + 中间流动的能量力场（深浅交替的能量条纹 + 高光）
+const PAL_BARRIER = { "#": "#12283e", "b": "#9fe4ff", "B": "#4fb4f0", "h": "#e8fbff", "d": "#1f6fb0" };
+const BARRIER_BODY = [
+  "................",
+  "...##......##...",
+  "..#bb#....#bb#..",
+  "..#bb#.##.#bb#..",
+  "..#bb##BB##bb#..",
+  "..#bb#hBBh#bb#..",
+  "..#bb##BB##bb#..",
+  "..#bb#hBBh#bb#..",
+  "..#bb##BB##bb#..",
+  "..#bb#hBBh#bb#..",
+  "..#bb##BB##bb#..",
+  "..#bb#hBBh#bb#..",
+  "..#bb#.dd.#bb#..",
+  "...##......##...",
+  "...dd......dd...",
+  "................"
+];
+// 注射剂：针筒造型（推杆 / 玻璃针管 + 绿色药液 / 针头），治疗机关
+const PAL_SYRINGE = { "#": "#1b2430", "p": "#8e9fb4", "g": "#cfe8ff", "G": "#7cff6b", "d": "#3fae4f", "n": "#c8d3e0" };
+const SYRINGE_BODY = [
+  "................",
+  ".....#pp#.......",
+  ".....#pp#.......",
+  "....##pp##......",
+  ".....#pp#.......",
+  "....#gggg#......",
+  "...#gggggg#.....",
+  "...#gGGGGg#.....",
+  "...#gGGGGg#.....",
+  "...#gGddGGg#....",
+  "...#gGGGGg#.....",
+  "...#gggggg#.....",
+  "....#gggg#......",
+  ".....#nn#.......",
+  "......##........",
+  "................"
+];
+// 水晶球：紫色水晶球体（高光 + 闪光）立于金色底座上，卡池限定机关
+const PAL_CRYSTAL = { "#": "#2a1b3d", "p": "#a06be0", "h": "#e3ccff", "w": "#ffffff", "g": "#d8a832", "d": "#8a6420" };
+const CRYSTAL_BODY = [
+  "................",
+  ".....######.....",
+  "....#pppppp#....",
+  "...#phhppppp#...",
+  "..#phhhpppppp#..",
+  "..#phhpppwppp#..",
+  "..#ppppwwpppp#..",
+  "..#pppwpppppp#..",
+  "...#pppppppp#...",
+  "....#pppppp#....",
+  "......#pp#......",
+  ".....##gg##.....",
+  "....#gggggg#....",
+  "...#ggdggdgg#...",
+  "...##########...",
+  "................"
+];
+// 雪人：双球雪人（圆头 + 圆身、胡萝卜鼻、黑眼黑扣、蓝围巾、树枝手臂），精英敌人
+const PAL_SNOWMAN = { "#": "#2b3550", "w": "#f4f8ff", "b": "#1b1b2b", "o": "#ff8c3a", "s": "#3a7bd5", "k": "#8a5a2a" };
+const SNOWMAN_BODY = [
+  "................",
+  ".....######.....",
+  "....#wwwwww#....",
+  "....#wwwwww#....",
+  "....#wbwwbw#....",
+  "....#wwwwww#....",
+  "....#wwooww#....",
+  ".....######.....",
+  "...ssssssssss...",
+  "...s#wwwwww#s...",
+  "..k.#wwwwww#.k..",
+  "..k#wwwwwwww#k..",
+  "...#wwwwwwww#...",
+  "...#wwbwwbww#...",
+  "....#wwwwww#....",
+  ".....######....."
+];
+function whitePal(pal) { const o = {}; for (const k in pal) o[k] = "#ffffff"; return o; }
+const SPR = {
+  slime:   { body: SLIME_BODY,   pal: PAL_SLIME,   scale: 2.2 },
+  snowman: { body: SNOWMAN_BODY, pal: PAL_SNOWMAN, scale: 2.2 },
+  pistol:  { body: GUN_BODY,     pal: PAL_GUN,     scale: 2.0 },
+  barrier: { body: BARRIER_BODY, pal: PAL_BARRIER, scale: 2.0 },
+  syringe: { body: SYRINGE_BODY, pal: PAL_SYRINGE, scale: 2.0 },
+  crystal: { body: CRYSTAL_BODY, pal: PAL_CRYSTAL, scale: 2.0 }
+};
+for (const k in SPR) SPR[k].wpal = whitePal(SPR[k].pal);
+/* 在 size×size 的格子里画实体图标（备战携带栏 / 图鉴 / 底部机关槽） */
+function drawEntityIcon(id, x, y, size) {
+  const sp = SPR[id];
+  if (!sp) return false;
+  const sc = size / 16;
+  drawSpriteXY(sp.body, x, y, sc, sc, sp.pal);
+  return true;
+}
+
+/* ================= 地图数据 =================
+   字符格式（12列×10行）：
+     '.' 空地（可建造）   '#' 敌人行进路线（可建造，且能阻挡敌人）
+     'S' 敌人出生点       'H' 奶龙所在格
+   出生点与奶龙格均可有多个；敌人出场时随机挑一个奶龙格作为目标，
+   路径在交叉/岔口处自然分流成多条支线。 */
+const MAPS = [
+  {
+    name: "回旋回廊",
+    life: LIFE_START,
+    grid: [
+      "S...........",
+      "#...........",
+      "#.H#######..",
+      "#....#...#..",
+      "#....#...H..",
+      "#....#...#..",
+      "#....#...#..",
+      "##########..",
+      ".....#......",
+      ".....S......"
+    ]
+  }
+];
+/* 地图解析：每个奶龙格各做一次 BFS（其他奶龙格视为不可通行），
+   于是「每个出生点 → 每个奶龙格」各有一条路线；敌人出场时随机挑一个奶龙作为目标，
+   交叉/岔口处便自然分成多条支线。 */
+function parseMap(def) {
+  const g = def.grid;
+  const spawns = [], homes = [];
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    if (g[r][c] === "S") spawns.push({ c, r });
+    else if (g[r][c] === "H") homes.push({ c, r });
+  }
+  const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  const cellCenter = (c, r) => ({ x: GRID_OX + c * CELL + CELL / 2, y: GRID_OY + r * CELL + CELL / 2 });
+  const routes = spawns.map(sp => homes.map(hm => {
+    const ok = (c, r) => c >= 0 && c < COLS && r >= 0 && r < ROWS &&
+      (g[r][c] === "#" || g[r][c] === "S" || (c === hm.c && r === hm.r));   // 其他奶龙格不可通行
+    const dist = Array.from({ length: ROWS }, () => new Array(COLS).fill(-1));
+    dist[hm.r][hm.c] = 0;
+    const q = [{ c: hm.c, r: hm.r }];
+    while (q.length) {
+      const cur = q.shift();
+      for (const [dc, dr] of DIRS) {
+        const nc = cur.c + dc, nr = cur.r + dr;
+        if (ok(nc, nr) && dist[nr][nc] < 0) { dist[nr][nc] = dist[cur.r][cur.c] + 1; q.push({ c: nc, r: nr }); }
+      }
+    }
+    const path = [cellCenter(sp.c, sp.r)];
+    if (dist[sp.r][sp.c] < 0) return path;                                  // 不可达（不应发生）
+    let c = sp.c, r = sp.r;
+    while (dist[r][c] > 0) {
+      for (const [dc, dr] of DIRS) {
+        const nc = c + dc, nr = r + dr;
+        if (nc >= 0 && nc < COLS && nr >= 0 && nr < ROWS && dist[nr][nc] === dist[r][c] - 1) { c = nc; r = nr; break; }
+      }
+      path.push(cellCenter(c, r));
+    }
+    return path;
+  }));
+  // 方向箭头：汇总所有支线，同一段路只画一次
+  const arrowSegs = [], seen = new Set();
+  for (const perSpawn of routes) for (const rt of perSpawn) {
+    for (let i = 0; i + 1 < rt.length; i += 2) {
+      const a = rt[i], b = rt[i + 1];
+      const key = [a.x, a.y, b.x, b.y].join(",");
+      const rkey = [b.x, b.y, a.x, a.y].join(",");
+      if (seen.has(key) || seen.has(rkey)) continue;
+      seen.add(key);
+      arrowSegs.push({ x: a.x, y: a.y, ch: b.x > a.x ? "→" : b.x < a.x ? "←" : b.y > a.y ? "↓" : "↑" });
+    }
+  }
+  return { def, g, spawns, homes, routes, arrowSegs };
+}
+const cellChar = (c, r) => (c >= 0 && c < COLS && r >= 0 && r < ROWS) ? CUR.g[r][c] : ".";
+
+/* ================= 机关 / 敌人 / 波次 数据注册表 =================
+   机关 TRAPS：{
+     id, name, cost,                 // 费用（奶龙币）
+     hp, def, atk, interval,         // 生命 / 防御 / 攻击 / 攻击间隔(秒)
+     block,                          // 阻挡数（建在路线上时可阻挡的最大地面敌人数）
+     range,                          // 射程（格）：>0 为远程攻击（可索敌并命中飞行敌人）；0 为近战（仅打被自己阻挡的敌人）
+     heal?,                           // 治疗机关：true 时不攻击敌人，改为每 interval 秒治疗 range 格内生命最低的受损友方机关（治疗量=攻击力）
+     aoe?,                           // 范围攻击：true 时每次攻击命中 range 格内所有敌人（含飞行），并附加麻痹（PARA_TIME 秒无法移动）
+     skill?, desc, color             // 技能（可选）/ 说明 / 主题色
+   }                                                                   */
+const TRAPS = [
+  {
+    id: "pistol", name: "手枪", cost: 80,
+    hp: 1000, def: 80, atk: 250, interval: 2,
+    block: 1, range: 4,
+    color: "#b8c4d0",
+    desc: "远程攻击：可命中 4 格内的一名敌人（含飞行敌人），也能阻挡 1 个地面敌人。"
+  },
+  {
+    id: "barrier", name: "屏障", cost: 120,
+    hp: 3500, def: 150, atk: 100, interval: 2,
+    block: 2, range: 0,
+    color: "#6fc8ff",
+    desc: "高血高防的能量壁障，可同时阻挡 2 个地面敌人；仅攻击被自己阻挡的敌人。"
+  },
+  {
+    id: "syringe", name: "注射剂", cost: 150,
+    hp: 800, def: 100, atk: 150, interval: 3,
+    block: 1, range: 3, heal: true,               // heal: 不攻击敌人，range 为治疗半径（格）
+    color: "#7cff6b",
+    desc: "不攻击敌人：每隔 3 秒为周围 3 格内生命最低的机关恢复生命，治疗量 = 攻击力（150）。可阻挡 1 个地面敌人。"
+  },
+  {
+    id: "crystal", name: "水晶球", cost: 100,     // 卡池限定机关：仅抽卡解锁
+    hp: 1200, def: 100, atk: 300, interval: 2.5,
+    block: 1, range: 3, aoe: true, limited: true, // limited: 卡池限定（抽卡限定池，重复转换材料更多）
+    color: "#c9a0ff",
+    desc: "范围攻击：每 2.5 秒攻击周围 3 格内的所有敌人（含飞行），并使其麻痹 0.8 秒无法移动。可阻挡 1 个地面敌人。"
+  }
+];
+/*   敌人 ENEMIES：{
+     id, name, tier, flying,             // tier:"normal"普通/"elite"精英；flying:是否飞行
+     hp, def, atk, interval,             // 生命 / 防御 / 攻击 / 攻击间隔(秒)
+     speed,                              // 移动速度（格/秒）
+     exp,                                // 击败后获得的守卫经验
+     special?/freeze?, desc, color        // 特殊机制 / 攻击使机关冻结1秒（可选）/ 说明 / 主题色
+   }
+   飞行敌人：不会被机关阻挡，且只有远程攻击（机关 range>0）能索敌并命中。          */
+const ENEMIES = [
+  {
+    id: "slime", name: "史莱姆", tier: "normal", flying: false,
+    hp: 1000, def: 50, atk: 240, interval: 2, speed: 1.5,
+    exp: 10, color: "#7cd06a",
+    desc: "仅在被机关阻挡时攻击；移动缓慢但非常耐打。"
+  },
+  {
+    id: "snowman", name: "雪人", tier: "elite", flying: false,
+    hp: 3000, def: 150, atk: 300, interval: 2, speed: 1.5,
+    exp: 40, freeze: true, color: "#9fd8ff",
+    desc: "精英：仅在被机关阻挡时攻击，攻击使机关冻结 1 秒（冻结：无法行动）。"
+  }
+];
+/*   波次 WAVE_CFG：敌人分波次程序化出击，每波从出生点刷新「随机数量 × 随机种类」的敌人
+     firstDelay 首波延迟(秒) | gap 波次间隔(秒)
+     每波数量 = countBase + ⌊(波次-1)/countGrowEvery⌋ + 随机0~countRand，上限 countCap（随波次提高，有上限）
+     spawnGap 同波内敌人的出场间隔(秒)
+     eliteChance 精英出现概率（第 lateWave 波及之前）| eliteChanceLate 第 lateWave 波之后提升后的精英概率
+     scaleMul 第 lateWave 波之后，每波敌人生命/攻击/防御 ×scaleMul（复利，可叠加）
+     maxWave 通关所需波次数（Infinity = 无尽模式）                              */
+const WAVE_CFG = {
+  firstDelay: 8, gap: 15,
+  countBase: 2, countGrowEvery: 3, countRand: 2, countCap: 8,
+  spawnGap: 0.7,
+  lateWave: 5, eliteChance: 0.12, eliteChanceLate: 0.30,
+  scaleMul: 1.1, maxWave: Infinity          // scaleMul: 第5波后每波 生命/攻击/防御 ×1.1（复利）
+};
+
+/* ================= 战略（升级三选一） =================
+   scope: "global" 通用战略 | "trap" 机关战略（需携带对应机关才会刷新，trap 字段为机关id）
+   apply(mods)：直接修改全局增益对象。
+   mods = { coinRate:额外币/s, trapHp:机关生命倍率, trapAtk:机关攻击倍率,
+            enemySpeed:敌移速倍率, trapMods:{ 机关id:{atk,interval,...} } }     */
+const STRATEGIES = [
+  { id: "vault", name: "金库",     scope: "global", desc: "每秒额外获得 3 个奶龙币。", apply: m => { m.coinRate += 3; } },
+  { id: "wall",  name: "坚壁",     scope: "global", desc: "所有机关生命上限 +30%（场上机关按比例恢复）。", apply: m => { m.trapHp *= 1.3; } },
+  { id: "grind", name: "磨刀",     scope: "global", desc: "所有机关攻击力 +25%。", apply: m => { m.trapAtk *= 1.25; } },
+  { id: "fog",   name: "迟缓雾气", scope: "global", desc: "所有敌人移动速度 -12%。", apply: m => { m.enemySpeed *= 0.88; } }
+  /* 机关战略示例（后续随机关加入）：
+  { id:"oc_cannon", name:"超载核心", scope:"trap", trap:"cannon",
+    desc:"加农炮攻击间隔 -30%。", apply: m => { (m.trapMods.cannon = m.trapMods.cannon || {}).interval = 0.7; } } */
+];
+
+/* ================= 研发系统（养成 / 抽卡，局外成长） =================
+   存档 localStorage「nailong_bw_save」：{ stone, mat, owned, lv, pityAny/pityLtd 保底计数,
+     wkKey/wkStone 战斗奶石周计数, dayKey/dayKills/dayDone 每日任务, gachaGift 抽卡首进赠送标记 }
+   · 养成：消耗材料为机关升级（至多 Lv.5），每级 生命/攻击/防御 +20%（基于基础值，Lv.5 = 1.8 倍）
+   · 抽卡：每次消耗 160 奶石，可抽 1 次或 10 次；卡池 = 限定机关2% + 普通机关6% + 材料×1 92%，
+     重复机关自动转换为材料（限定×20 / 普通×5）；保底：10抽内必出机关、60抽内必出限定机关
+   · 奶石获取：首次启动赠送 3200；战斗结算（10波起 20+每波10，单局≤100，每周≤1000）；
+     每日任务（消灭50敌人=200）；首次进入抽卡界面赠送 3200 */
+const LAB_SAVE_KEY = "nailong_bw_save";
+const STONE_START  = 3200;                     // 首次启动赠送的奶石（旧存档不受影响）
+const DRAW_COST    = 160;                      // 每次抽卡消耗的奶石
+const TRAP_LV_MAX  = 5;                        // 机关研发等级上限
+const LAB_LV_STEP  = 0.2;                      // 每级提升幅度（基于基础值）
+const LAB_UP_COST  = [0, 5, 10, 20, 50];       // Lv.1→2 .. Lv.4→5 的材料消耗（满级共 85）
+const DUP_TO_MAT   = 20;                       // 抽到重复的卡池限定机关转换的材料数
+const DUP_TO_MAT_TRAP = 5;                     // 抽到重复的普通机关转换的材料数
+/* 研发系统上线时已有的机关默认拥有；后续新机关不进此列表 → 需抽卡解锁 */
+const LAB_INIT_OWNED = ["pistol", "barrier", "syringe"];
+/* 卡池（权重随机，用户指定概率）：卡池限定机关 2% + 普通机关 6% + 材料×1 92%
+   保底规则：①连续 9 抽未出任何机关 → 下一抽必出机关（普通；若同时触发②则为限定）
+             ②连续 59 抽未出限定机关 → 下一抽必出限定机关  ③限定池内等概率 */
+const PITY_TRAP = 9, PITY_LTD = 59;
+const GACHA_POOL = [
+  { type: "limited", w: 2 },                   // 卡池限定机关（从 limited 池等概率抽取）
+  { type: "trap", w: 6 },                      // 普通机关（从非 limited 池等概率抽取）
+  { type: "mat", n: 1, w: 92 }                 // 材料×1
+];
+/* 奶石获取途径：
+   ① 战斗结算：通过<10波=0，达到10波=20，之后每多通过1波+10，单局上限100，每周上限1000
+   ② 每日任务：消灭 50 个敌人 → 200 奶石（按自然日重置）
+   ③ 首次进入抽卡界面：赠送 3200（一次性） */
+const BATTLE_STONE_CAP = 100, WEEK_STONE_MAX = 1000;
+const DAY_KILL_NEED = 50, DAY_KILL_STONE = 200;
+const GACHA_GIFT = 3200;
+function storeGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function storeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function loadLab() {
+  const d = { stone: STONE_START, mat: 0, owned: {}, lv: {}, pityAny: 0, pityLtd: 0,
+              wkKey: "", wkStone: 0, dayKey: "", dayKills: 0, dayDone: false, gachaGift: false };
+  for (const t of TRAPS) { d.owned[t.id] = LAB_INIT_OWNED.includes(t.id); d.lv[t.id] = 1; }
+  let s = null;
+  try { s = JSON.parse(storeGet(LAB_SAVE_KEY) || "null"); } catch (e) { s = null; }
+  if (s) {
+    d.stone = Math.max(0, s.stone | 0); d.mat = Math.max(0, s.mat | 0);
+    d.pityAny = Math.max(0, s.pityAny | 0); d.pityLtd = Math.max(0, s.pityLtd | 0);   // 保底计数（旧存档默认0）
+    d.wkKey = s.wkKey || ""; d.wkStone = Math.max(0, s.wkStone | 0);                // 战斗奶石：周上限计数
+    d.dayKey = s.dayKey || ""; d.dayKills = Math.max(0, s.dayKills | 0);            // 每日任务：日期/击杀/完成
+    d.dayDone = !!s.dayDone; d.gachaGift = !!s.gachaGift;                           // 抽卡首进赠送标记
+    for (const t of TRAPS) {
+      if (s.owned && t.id in s.owned) d.owned[t.id] = !!s.owned[t.id];   // 存档为准；未来新机关默认未拥有
+      if (s.lv && s.lv[t.id] >= 1) d.lv[t.id] = Math.min(TRAP_LV_MAX, s.lv[t.id] | 0);
+    }
+  }
+  return d;
+}
+let lab = loadLab();
+function saveLab() { storeSet(LAB_SAVE_KEY, JSON.stringify(lab)); }
+/* 研发等级加成倍率与生效属性（费用/攻击间隔/射程/阻挡不变） */
+const labLvMul = id => 1 + LAB_LV_STEP * ((lab.lv[id] || 1) - 1);
+function trapEffBase(t) {
+  const m = labLvMul(t.id);
+  if (m === 1) return t;
+  return Object.assign({}, t, {
+    hp: Math.round(t.hp * m), atk: Math.round(t.atk * m), def: Math.round(t.def * m)
+  });
+}
+/* 养成：升级 */
+const upCostOf = id => LAB_UP_COST[(lab.lv[id] || 1)];       // 升至下一级所需材料（满级为 undefined）
+const canUpgrade = id => lab.owned[id] && (lab.lv[id] || 1) < TRAP_LV_MAX && lab.mat >= (upCostOf(id) || Infinity);
+function upgradeTrap(id) {
+  if ((lab.lv[id] || 1) >= TRAP_LV_MAX) { hint("已满级"); return false; }
+  if (!canUpgrade(id)) { hint("材料不足"); return false; }
+  lab.mat -= upCostOf(id); lab.lv[id] = (lab.lv[id] || 1) + 1; saveLab();
+  return true;
+}
+/* 抽卡 */
+/* 卡池分组：限定池（limited:true）与普通池，池内等概率抽取 */
+const ltdPool = () => TRAPS.filter(t => t.limited);
+const normalPool = () => TRAPS.filter(t => !t.limited);
+const pickFrom = arr => arr[(Math.random() * arr.length) | 0];
+function rollGachaOnce() {          // 返回 {type:"trap",id} 或 {type:"mat",n}
+  if (lab.pityLtd >= PITY_LTD) return { type: "trap", id: pickFrom(ltdPool()).id };     // 保底②：必出限定
+  if (lab.pityAny >= PITY_TRAP) return { type: "trap", id: pickFrom(normalPool()).id }; // 保底①：必出普通机关
+  let tot = 0; for (const p of GACHA_POOL) tot += p.w;
+  let r = Math.random() * tot;
+  for (const p of GACHA_POOL) {
+    r -= p.w; if (r >= 0) continue;
+    if (p.type === "limited") return { type: "trap", id: pickFrom(ltdPool()).id };
+    if (p.type === "trap") return { type: "trap", id: pickFrom(normalPool()).id };
+    return { type: "mat", n: p.n };
+  }
+  return { type: "mat", n: 1 };
+}
+function drawGacha(times) {
+  if (lab.stone < DRAW_COST * times) { hint("奶石不足"); return false; }
+  lab.stone -= DRAW_COST * times;
+  const items = [];
+  for (let i = 0; i < times; i++) {
+    const p = rollGachaOnce();
+    if (p.type === "trap") {
+      const t = TRAPS.find(v => v.id === p.id), isLtd = !!(t && t.limited);
+      lab.pityAny = 0;                                   // 出机关：重置机关保底
+      if (isLtd) lab.pityLtd = 0; else lab.pityLtd++;    // 出限定：重置限定保底；否则累计
+      if (lab.owned[p.id]) {
+        const conv = isLtd ? DUP_TO_MAT : DUP_TO_MAT_TRAP;
+        lab.mat += conv; items.push({ type: "trap", id: p.id, dup: true, conv });
+      } else {
+        lab.owned[p.id] = true; lab.lv[p.id] = lab.lv[p.id] || 1;
+        items.push({ type: "trap", id: p.id, dup: false });
+      }
+    } else { lab.mat += p.n; lab.pityAny++; lab.pityLtd++; items.push({ type: "mat", n: p.n }); }
+  }
+  saveLab();
+  labResult = items;
+  return true;
+}
+/* ---- 奶石获取：战斗结算 / 每日任务 ---- */
+const weekKey = () => { const d = new Date(), o = new Date(d.getFullYear(), 0, 1); return d.getFullYear() + "w" + (((d - o) / 6048e5) | 0); };
+const dayKey = () => new Date().toDateString();
+let endReward = 0, endTaskReward = 0;        // 本局结算所得（结算面板展示用）
+function battleStone(win) {                  // 战斗结算奶石：负=当前波未通过，胜=全部通过
+  const passed = win ? waveIdx : waveIdx - 1;
+  return passed < 10 ? 0 : Math.min(BATTLE_STONE_CAP, 20 + (passed - 10) * 10);
+}
+function applyEndRewards(win) {
+  const wk = weekKey();
+  if (lab.wkKey !== wk) { lab.wkKey = wk; lab.wkStone = 0; }                       // 周重置
+  endReward = Math.min(battleStone(win), Math.max(0, WEEK_STONE_MAX - lab.wkStone));
+  lab.wkStone += endReward; lab.stone += endReward;
+  const dk = dayKey();
+  if (lab.dayKey !== dk) { lab.dayKey = dk; lab.dayKills = 0; lab.dayDone = false; } // 日重置
+  lab.dayKills += kills; endTaskReward = 0;
+  if (!lab.dayDone && lab.dayKills >= DAY_KILL_NEED) {                             // 每日任务：消灭50敌人
+    lab.dayDone = true; endTaskReward = DAY_KILL_STONE; lab.stone += DAY_KILL_STONE;
+  }
+  saveLab();
+}
+
+/* ================= 游戏状态 ================= */
+const ST = { MENU: 0, LOADOUT: 1, PLAY: 2, STRAT: 3, WIN: 4, LOSE: 5, LAB: 6 };
+let state = ST.MENU;
+
+let CUR = parseMap(MAPS[0]);          // 当前地图（解析后）
+let loadout = [];                     // 携带的机关（至多 6 个，元素为 TRAPS 条目）
+let traps = [];                       // 场上机关
+let enemies = [];                     // 场上敌人
+let fx = [];                          // 特效（射线/爆裂）
+let coins = COIN_START, life = LIFE_START;
+let lv = 1, exp = 0, kills = 0, gameT = 0;
+let chosen = [];                      // 已选战略 id
+let mods = { coinRate: 0, trapHp: 1, trapAtk: 1, enemySpeed: 1, trapMods: {} };
+let pendingStrats = 0, stratOpts = [];
+let selTrap = -1, demolishMode = false;
+let labTab = "up", labResult = null;      // 研发所：当前页签（up 养成 / gacha 抽卡）/ 抽卡结果展示
+let labUpScroll = 0, labDragY = null;     // 养成页：滚动偏移 / 触屏拖动的画布 y 坐标
+let hintMsg = "", hintT = 0;
+let mouse = { x: -99, y: -99 };
+let menuT = 0;
+
+/* 波次运行状态：waveIdx 已开始的波次数，nextWaveT 下一波开始的时刻，spawnQ 待出场敌人队列 */
+let waveIdx = 0, nextWaveT = 0, spawnQ = [], waveBannerT = 0;
+
+const expNeed = () => Math.min(lv, 4) * 100;   // 升级所需经验：100/200/300/400（400 封顶）
+
+function resetGame() {
+  traps = []; enemies = []; fx = [];
+  coins = COIN_START; life = CUR.def.life || LIFE_START;
+  lv = 1; exp = 0; kills = 0; gameT = 0;
+  chosen = []; pendingStrats = 0; stratOpts = [];
+  selTrap = -1; demolishMode = false;
+  hintMsg = ""; hintT = 0;
+  waveIdx = 0; nextWaveT = WAVE_CFG.firstDelay; spawnQ = []; waveBannerT = 0;
+  recomputeMods();
+}
+function startGame(mapIdx) {
+  CUR = parseMap(MAPS[mapIdx == null ? (Math.random() * MAPS.length) | 0 : mapIdx]);
+  resetGame();
+  state = ST.PLAY;
+}
+
+/* ================= 战略系统 ================= */
+function recomputeMods() {
+  const ratios = traps.map(t => t.hpMax ? t.hp / t.hpMax : 1);
+  mods = { coinRate: 0, trapHp: 1, trapAtk: 1, enemySpeed: 1, trapMods: {} };
+  for (const id of chosen) { const s = STRATEGIES.find(x => x.id === id); if (s) s.apply(mods); }
+  traps.forEach((t, i) => {
+    t.hpMax = Math.round(t.base.hp * mods.trapHp);
+    t.hp = Math.max(1, Math.round(t.hpMax * (ratios[i] || 0)));
+  });
+}
+function drawStratOptions() {
+  const pool = STRATEGIES.filter(s => !chosen.includes(s.id) &&
+    (s.scope === "global" || loadout.some(t => t.id === s.trap)));
+  for (let i = pool.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0;[pool[i], pool[j]] = [pool[j], pool[i]]; }
+  return pool.slice(0, 3);
+}
+function gainExp(n) {
+  if (lv >= LV_MAX) return;
+  exp += n;
+  while (lv < LV_MAX && exp >= expNeed()) { exp -= expNeed(); lv++; pendingStrats++; }
+}
+function pickStrat(opt) {
+  if (!opt) return;
+  chosen.push(opt.id);
+  recomputeMods();
+  pendingStrats--;
+  if (pendingStrats > 0) {
+    const o = drawStratOptions();
+    if (o.length) { stratOpts = o; return; }
+    pendingStrats = 0;
+  }
+  state = ST.PLAY;
+}
+
+/* ================= 建造 / 拆除 ================= */
+const TRAP_BUILD_CAP = 5;                    // 每种机关在场上至多建造的数量
+const builtCount = id => traps.reduce((n, t) => n + (t.base.id === id ? 1 : 0), 0);
+const trapAt = (c, r) => traps.find(t => !t.dead && t.c === c && t.r === r);
+const buildableCell = (c, r) => { const ch = cellChar(c, r); return (ch === "." || ch === "#") && !trapAt(c, r); };
+function hint(msg) { hintMsg = msg; hintT = 1.6; }
+function trapAtkOf(t) { const tm = mods.trapMods[t.base.id] || {}; return Math.round(t.base.atk * mods.trapAtk * (tm.atk || 1)); }
+function trapIntervalOf(t) { const tm = mods.trapMods[t.base.id] || {}; return t.base.interval * (tm.interval || 1); }
+function buildAt(c, r) {
+  const lt = loadout[selTrap];
+  if (!lt) { hint(loadout.length ? "先选择要建造的机关" : "暂无可用机关，等待后续更新"); return false; }
+  const base = trapEffBase(lt);                          // 应用研发等级加成（生命/攻击/防御）
+  if (!buildableCell(c, r)) { hint("这里不能建造"); return false; }
+  if (builtCount(base.id) >= TRAP_BUILD_CAP) { hint(`${base.name}至多建造 ${TRAP_BUILD_CAP} 个`); return false; }
+  if (coins < base.cost) { hint("奶龙币不足"); return false; }
+  coins -= base.cost;
+  const hpMax = Math.round(base.hp * mods.trapHp);
+  traps.push({
+    base, c, r,
+    x: GRID_OX + c * CELL + CELL / 2, y: GRID_OY + r * CELL + CELL / 2,
+    hp: hpMax, hpMax, cd: 0, blocked: [], dead: false, flash: 0, frzT: 0
+  });
+  return true;
+}
+function demolishAt(c, r) {
+  const t = trapAt(c, r);
+  if (!t) { hint("这里没有机关"); return false; }
+  t.dead = true;
+  for (const e of t.blocked) e.blockedBy = null;
+  traps = traps.filter(x => x !== t);
+  coins = Math.min(COIN_MAX, coins + Math.floor(t.base.cost * SELL_BACK));
+  return true;
+}
+
+/* ================= 战斗引擎 ================= */
+/* 伤害公式：MAX(攻击力 - 防御力, 攻击力 × 5%)，双向通用（敌↔机关） */
+const calcDmg = (atk, def) => Math.max(atk - def, Math.ceil(atk * 0.05));
+const PARA_TIME = 0.8;                       // 麻痹时长（秒）：无法移动（被阻挡时的攻击不受影响）
+const FREEZE_TIME = 1;                       // 冻结时长（秒）：机关无法行动（攻击/治疗/冷却暂停，阻挡仍有效）
+function waveMul(no) { return Math.pow(WAVE_CFG.scaleMul, Math.max(0, no - WAVE_CFG.lateWave)); }
+const fmtMul = m => { const s = m.toFixed(2); return s.endsWith("0") ? s.slice(0, -1) : s; };   // ×1.1 / ×1.21
+function waveEliteChance(no) { return no > WAVE_CFG.lateWave ? WAVE_CFG.eliteChanceLate : WAVE_CFG.eliteChance; }
+function waveCount(no) {                     // 每波刷怪数量：随波次提高（每 countGrowEvery 波 +1），有上限
+  const b = WAVE_CFG.countBase + (((no - 1) / WAVE_CFG.countGrowEvery) | 0);
+  return Math.min(WAVE_CFG.countCap, b + ((Math.random() * (WAVE_CFG.countRand + 1)) | 0));
+}
+/* 开新一波：随机数量 × 随机种类（按 tier 概率），敌人按波次倍率强化生命/攻击/防御后排队出场 */
+function startWave() {
+  waveIdx++;
+  const mul = waveMul(waveIdx);
+  const normals = ENEMIES.filter(e => e.tier !== "elite");
+  const elites  = ENEMIES.filter(e => e.tier === "elite");
+  const count = waveCount(waveIdx);
+  for (let i = 0; i < count; i++) {
+    const pool = (elites.length && Math.random() < waveEliteChance(waveIdx)) ? elites : normals;
+    if (!pool.length) continue;                 // 图鉴为空时静默跳过
+    const base = pool[(Math.random() * pool.length) | 0];
+    spawnQ.push({ base, spawn: (Math.random() * CUR.spawns.length) | 0, mul, t: gameT + i * WAVE_CFG.spawnGap });
+  }
+  waveBannerT = 2.2;
+}
+function spawnEnemy(q) {
+  const b = q.base;
+  const perSpawn = CUR.routes[q.spawn % CUR.routes.length];
+  if (!perSpawn || !perSpawn.length) return;
+  const route = perSpawn[(Math.random() * perSpawn.length) | 0];   // 随机挑一个奶龙作为本敌人的目标
+  const hp = Math.round(b.hp * q.mul);
+  enemies.push({
+    base: b, route, routeIdx: 1,
+    x: route[0].x, y: route[0].y,
+    hp, maxHp: hp, atk: Math.round(b.atk * q.mul), def: Math.round(b.def * q.mul), interval: b.interval,
+    flying: !!b.flying, elite: b.tier === "elite",
+    cd: 0, blockedBy: null, dead: false, flash: 0, paraT: 0,
+    jx: Math.random() * 12 - 6, jy: Math.random() * 8 - 4
+  });
+}
+function hurtEnemy(e, dmg) {
+  e.hp -= dmg; e.flash = 0.1;
+  if (e.hp <= 0 && !e.dead) {
+    e.dead = true; kills++;
+    gainExp(e.base.exp);
+    fx.push({ type: "burst", x: e.x + e.jx, y: e.y + e.jy, ttl: 0.4, color: e.base.color || "#c060ff" });
+  }
+}
+function update(dt) {
+  gameT += dt;
+  coins = Math.min(COIN_MAX, coins + (COIN_RATE + mods.coinRate) * dt);
+  if (hintT > 0) hintT -= dt;
+  if (waveBannerT > 0) waveBannerT -= dt;
+
+  /* ---- 波次调度：到点开新波（不超过总波次数）；波内敌人按 spawnGap 依次从出生点出场 ---- */
+  if (waveIdx < WAVE_CFG.maxWave && gameT >= nextWaveT) { startWave(); nextWaveT = gameT + WAVE_CFG.gap; }
+  for (let i = spawnQ.length - 1; i >= 0; i--) {
+    if (gameT >= spawnQ[i].t) { spawnEnemy(spawnQ[i]); spawnQ.splice(i, 1); }
+  }
+
+  /* ---- 敌人：移动 / 攻击机关 ---- */
+  for (const e of enemies) {
+    if (e.dead) continue;
+    if (e.flash > 0) e.flash -= dt;
+    if (e.blockedBy) {
+      if (e.blockedBy.dead) { e.blockedBy = null; }
+      else {
+        e.cd -= dt;
+        if (e.cd <= 0) {
+          e.cd = e.interval;
+          const t = e.blockedBy;
+          t.hp -= calcDmg(e.atk, t.base.def);
+          t.flash = 0.12;
+          if (e.base.freeze && t.hp > 0) t.frzT = Math.max(t.frzT, FREEZE_TIME);   // 雪人：攻击使机关冻结
+          if (t.hp <= 0) {
+            t.dead = true;
+            for (const b of t.blocked) b.blockedBy = null;
+            t.blocked.length = 0;
+            fx.push({ type: "burst", x: t.x, y: t.y, ttl: 0.4, color: "#b8c4d0" });
+          }
+        }
+      }
+    }
+    if (e.paraT > 0) { e.paraT -= dt; }        // 麻痹：无法移动（被阻挡时的攻击不受影响）
+    else if (!e.blockedBy) {
+      const spd = e.base.speed * CELL * mods.enemySpeed;
+      let rest = spd * dt;
+      while (rest > 0 && !e.dead) {
+        const tp = e.route[e.routeIdx];
+        const dx = tp.x - e.x, dy = tp.y - e.y, d = Math.hypot(dx, dy);
+        if (d <= rest) {
+          e.x = tp.x; e.y = tp.y; rest -= d; e.routeIdx++;
+          if (e.routeIdx >= e.route.length) {           // 抵达奶龙格
+            e.dead = true; life--;
+            fx.push({ type: "burst", x: e.x, y: e.y, ttl: 0.5, color: C.danger });
+            if (life <= 0) { state = ST.LOSE; applyEndRewards(false); return; }
+          }
+        } else { e.x += dx / d * rest; e.y += dy / d * rest; rest = 0; }
+      }
+      // 阻挡判定：当前所在格有未满阻挡的路线机关 → 停靠（飞行敌人不被阻挡）
+      if (!e.dead && !e.flying) {
+        const cc = Math.floor((e.x - GRID_OX) / CELL), cr = Math.floor((e.y - GRID_OY) / CELL);
+        const t = trapAt(cc, cr);
+        if (t && cellChar(cc, cr) === "#" && t.blocked.length < t.base.block) {
+          e.blockedBy = t; t.blocked.push(e);
+        }
+      }
+    }
+  }
+
+  /* ---- 机关：索敌 / 攻击 ---- */
+  for (const t of traps) {
+    if (t.dead) continue;
+    if (t.flash > 0) t.flash -= dt;
+    t.blocked = t.blocked.filter(e => !e.dead && e.blockedBy === t);
+    if (t.frzT > 0) { t.frzT -= dt; continue; }        // 冻结：无法行动（攻击/治疗/冷却全部暂停，阻挡仍有效）
+    t.cd -= dt;
+    if (t.base.heal) {                                 // 治疗机关：为 range 格内生命最低的受损友方机关回血
+      if (t.cd <= 0) {
+        let tgt = null;
+        for (const o of traps) {
+          if (o === t || o.dead || o.hp >= o.hpMax) continue;
+          const d = Math.hypot(o.x - t.x, o.y - t.y);
+          if (d <= t.base.range * CELL && (!tgt || o.hp < tgt.hp)) tgt = o;
+        }
+        if (tgt) {                                     // 没有可治疗的机关时不消耗冷却，持续待命
+          t.cd = trapIntervalOf(t);
+          tgt.hp = Math.min(tgt.hpMax, tgt.hp + trapAtkOf(t));   // 治疗量 = 攻击力
+          fx.push({ type: "heal", x1: t.x, y1: t.y, x2: tgt.x, y2: tgt.y, ttl: 0.35 });
+        }
+      }
+      continue;
+    }
+    if (t.base.aoe) {                                  // 范围攻击：命中 range 格内所有敌人（含飞行）并附加麻痹
+      if (t.cd <= 0) {
+        let hitAny = false;
+        for (const e of enemies) {
+          if (e.dead) continue;
+          if (Math.hypot(e.x - t.x, e.y - t.y) > t.base.range * CELL) continue;
+          hurtEnemy(e, calcDmg(trapAtkOf(t), e.def));
+          if (!e.dead) e.paraT = Math.max(e.paraT, PARA_TIME);
+          hitAny = true;
+        }
+        if (hitAny) {                                  // 范围内无敌时不耗冷却，持续待命
+          t.cd = trapIntervalOf(t);
+          fx.push({ type: "nova", x: t.x, y: t.y, r: t.base.range * CELL, ttl: 0.3 });
+        }
+      }
+      continue;
+    }
+    let target = t.blocked.find(e => !e.dead) || null;   // 优先打被自己阻挡的地面敌人
+    if (!target && t.base.range > 0) {                   // 远程：射程内最近敌人（含飞行敌人）
+      let bd = Infinity;
+      for (const e of enemies) {
+        if (e.dead) continue;
+        const d = Math.hypot(e.x - t.x, e.y - t.y);
+        if (d <= t.base.range * CELL && d < bd) { bd = d; target = e; }
+      }
+    }
+    if (target && t.cd <= 0) {
+      t.cd = trapIntervalOf(t);
+      hurtEnemy(target, calcDmg(trapAtkOf(t), target.def));
+      fx.push({ type: "tracer", x1: t.x, y1: t.y, x2: target.x + target.jx, y2: target.y + target.jy, ttl: 0.09 });
+    }
+  }
+  traps = traps.filter(t => !t.dead);
+  enemies = enemies.filter(e => !e.dead);
+
+  /* ---- 特效 ---- */
+  for (const f of fx) f.ttl -= dt;
+  fx = fx.filter(f => f.ttl > 0);
+
+  /* ---- 升级 → 三选一战略 ---- */
+  if (pendingStrats > 0) {
+    const opts = drawStratOptions();
+    if (opts.length) { stratOpts = opts; state = ST.STRAT; }
+    else pendingStrats = 0;
+  }
+
+  /* ---- 胜利判定：配置了总波次数时，全部放完且场上无敌 ---- */
+  if (WAVE_CFG.maxWave < Infinity && waveIdx >= WAVE_CFG.maxWave && spawnQ.length === 0 && enemies.length === 0 && state === ST.PLAY) { state = ST.WIN; applyEndRewards(true); }
+}
+
+/* ================= 输入 ================= */
+const IS_TOUCH = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+const HUB_BTN = IS_TOUCH ? { x: 14, y: 14, w: 112, h: 36, label: "← 游戏大厅" }
+                         : { x: 12, y: 12, w: 88,  h: 26, label: "← 游戏大厅" };
+const BTN_MENU_START = { x: W / 2 - 190, y: 420, w: 180, h: 48 };
+const BTN_MENU_LAB   = { x: W / 2 + 10,  y: 420, w: 180, h: 48 };
+const BTN_LO_GO   = { x: W / 2 + 21,  y: 452, w: 168, h: 46 };
+const BTN_LO_BACK = { x: W / 2 - 189, y: 452, w: 140, h: 46 };
+const BTN_END_AGAIN = { x: W / 2 - 160, y: 336, w: 140, h: 44 };
+const BTN_END_HUB   = { x: W / 2 + 20,  y: 336, w: 140, h: 44 };
+const BTN_LAB_BACK = IS_TOUCH ? { x: 14, y: 14, w: 112, h: 36, label: "← 返回" }
+                              : { x: 12, y: 12, w: 88,  h: 26, label: "← 返回" };
+const BTN_TAB_UP = { x: W / 2 - 210, y: 56, w: 200, h: 42 };
+const BTN_TAB_GA = { x: W / 2 + 10,  y: 56, w: 200, h: 42 };
+const BTN_DRAW1  = { x: W / 2 - 230, y: 416, w: 210, h: 58 };
+const BTN_DRAW10 = { x: W / 2 + 20,  y: 416, w: 210, h: 58 };
+const DEMOLISH_BTN = { x: W - 126, y: 579, w: 110, h: 46 };
+function hitR(p, b) { return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h; }
+
+function slotRects() {          // 底部机关栏 6 个槽位
+  const out = [];
+  const w = 84, h = 56, gap = 12, x0 = (W - (6 * w + 5 * gap)) / 2, y = 572;
+  for (let i = 0; i < 6; i++) out.push({ x: x0 + i * (w + gap), y, w, h, i });
+  return out;
+}
+function loadoutSlotRects() {   // 备战界面 6 个携带槽
+  const out = [];
+  const w = 90, h = 64, gap = 12, x0 = (W - (6 * w + 5 * gap)) / 2, y = 104;
+  for (let i = 0; i < 6; i++) out.push({ x: x0 + i * (w + gap), y, w, h, i });
+  return out;
+}
+function inventoryRects() {     // 备战界面 机关图鉴卡片（每行 4 张）
+  const out = [];
+  const w = 176, h = 92, gap = 14, x0 = (W - (4 * w + 3 * gap)) / 2, y0 = 216;
+  for (let i = 0; i < TRAPS.length; i++) {
+    const r = (i / 4) | 0, c = i % 4;
+    out.push({ x: x0 + c * (w + gap), y: y0 + r * (h + gap), w, h, i });
+  }
+  return out;
+}
+function stratCardRects() {
+  const out = [];
+  const w = 190, h = 210, gap = 20, x0 = (W - (3 * w + 2 * gap)) / 2, y = 196;
+  for (let i = 0; i < 3; i++) out.push({ x: x0 + i * (w + gap), y, w, h, i });
+  return out;
+}
+function labUpCardRects() {     // 研发所·养成页 机关卡片（每行 3 张）
+  const out = [];
+  const w = 320, h = 440, gap = 24, y0 = 116, per = 3;
+  for (let i = 0; i < TRAPS.length; i++) {
+    const r = (i / per) | 0, c = i % per;
+    const n = Math.min(per, TRAPS.length - r * per);
+    const x0 = (W - (n * w + (n - 1) * gap)) / 2;
+    out.push({ x: x0 + c * (w + gap), y: y0 + r * (h + gap), w, h, i });
+  }
+  return out;
+}
+const labUpBtnRect = r => ({ x: r.x + 60, y: r.y + r.h - 66, w: 200, h: 48 });   // 养成卡内的升级按钮
+const LAB_UP_VIEW_Y = 108;      // 养成页内容视口顶部（页签下方）
+function labUpMaxScroll() {     // 养成页最大滚动距离（内容超出视口的像素数 + 下边距）
+  const rows = Math.ceil(TRAPS.length / 3);
+  return Math.max(0, 116 + rows * (440 + 24) - 24 - (H - 16));
+}
+const cellFromPt = p => {
+  const c = Math.floor((p.x - GRID_OX) / CELL), r = Math.floor((p.y - GRID_OY) / CELL);
+  return (c >= 0 && c < COLS && r >= 0 && r < ROWS) ? { c, r } : null;
+};
+
+function onPointerDown(p) {
+  mouse = p;
+  if (state === ST.MENU) {
+    if (hitR(p, HUB_BTN)) { location.href = "../index.html"; return; }
+    if (hitR(p, BTN_MENU_START)) { state = ST.LOADOUT; return; }
+    if (hitR(p, BTN_MENU_LAB)) { state = ST.LAB; labResult = null; return; }
+  } else if (state === ST.LOADOUT) {
+    if (hitR(p, HUB_BTN)) { location.href = "../index.html"; return; }
+    if (hitR(p, BTN_LO_BACK)) { state = ST.MENU; return; }
+    if (hitR(p, BTN_LO_GO)) { startGame(); return; }
+    for (const r of loadoutSlotRects()) if (hitR(p, r)) { loadout.splice(r.i, 1); return; }   // 点槽位移除
+    for (const r of inventoryRects()) {          // 点图鉴卡片：加入/移出携带（至多 6 个）
+      if (hitR(p, r)) {
+        const t = TRAPS[r.i], idx = loadout.indexOf(t);
+        if (!lab.owned[t.id]) { hint("「" + t.name + "」未解锁，可在研发所抽卡获得"); return; }
+        if (idx >= 0) loadout.splice(idx, 1);
+        else if (loadout.length < 6) loadout.push(t);
+        else hint("至多携带 6 个机关");
+        return;
+      }
+    }
+  } else if (state === ST.PLAY) {
+    if (hitR(p, HUB_BTN)) { location.href = "../index.html"; return; }
+    if (hitR(p, DEMOLISH_BTN)) { demolishMode = !demolishMode; if (demolishMode) selTrap = -1; return; }
+    if (p.y >= BAR_Y) {
+      for (const r of slotRects()) if (hitR(p, r)) {
+        if (loadout[r.i]) { selTrap = selTrap === r.i ? -1 : r.i; demolishMode = false; }
+        else hint("暂无可用机关，等待后续更新");
+        return;
+      }
+      return;
+    }
+    const cell = cellFromPt(p);
+    if (cell) {
+      if (demolishMode) { demolishAt(cell.c, cell.r); return; }
+      if (trapAt(cell.c, cell.r)) return;            // 点已有机关：仅查看（右侧详情）
+      buildAt(cell.c, cell.r);
+    }
+  } else if (state === ST.STRAT) {
+    for (const r of stratCardRects()) if (hitR(p, r) && stratOpts[r.i]) { pickStrat(stratOpts[r.i]); return; }
+  } else if (state === ST.LAB) {
+    if (labResult) { labResult = null; return; }                 // 抽卡结果展示中：点击任意处关闭
+    if (hitR(p, BTN_LAB_BACK)) { state = ST.MENU; return; }
+    if (hitR(p, BTN_TAB_UP)) { labTab = "up"; return; }
+    if (hitR(p, BTN_TAB_GA)) { labTab = "gacha"; return; }
+    if (labTab === "up") {
+      if (p.y < LAB_UP_VIEW_Y) return;                             // 视口外的点击不触发（卡片可滚动）
+      for (const r of labUpCardRects()) {
+        const b = labUpBtnRect(r); b.y -= labUpScroll;             // 按钮随内容滚动
+        if (hitR(p, b)) { upgradeTrap(TRAPS[r.i].id); return; }
+      }
+    } else {
+      if (hitR(p, BTN_DRAW1)) { drawGacha(1); return; }
+      if (hitR(p, BTN_DRAW10)) { drawGacha(10); return; }
+    }
+  } else if (state === ST.WIN || state === ST.LOSE) {
+    if (hitR(p, BTN_END_AGAIN)) { state = ST.LOADOUT; return; }
+    if (hitR(p, BTN_END_HUB)) { location.href = "../index.html"; return; }
+  }
+}
+
+function canvasPos(t) {
+  const r = canvas.getBoundingClientRect();
+  const cx = t.clientX, cy = t.clientY;
+  if (wrapRotated) {
+    // 竖屏下 #wrap 被 JS 旋转 90°：屏幕 x/y 与画布坐标互换
+    return {
+      x: W / 2 + (cy - (r.top + r.height / 2)) * W / r.height,
+      y: H / 2 - (cx - (r.left + r.width / 2)) * H / r.width
+    };
+  }
+  return { x: (cx - r.left) * W / r.width, y: (cy - r.top) * H / r.height };
+}
+canvas.addEventListener("mousedown", e => onPointerDown(canvasPos(e)));
+canvas.addEventListener("mousemove", e => { mouse = canvasPos(e); });
+canvas.addEventListener("touchstart", e => {
+  e.preventDefault();
+  labDragY = canvasPos(e.changedTouches[0]).y;
+  for (const t of e.changedTouches) onPointerDown(canvasPos(t));
+}, { passive: false });
+canvas.addEventListener("touchmove", e => {
+  e.preventDefault();
+  mouse = canvasPos(e.changedTouches[0]);
+  if (labDragY != null && state === ST.LAB && labTab === "up") {   // 养成页拖动滑屏（画布坐标系，旋转屏自适配）
+    labUpScroll = Math.max(0, Math.min(labUpMaxScroll(), labUpScroll + (labDragY - mouse.y)));
+    labDragY = mouse.y;
+  }
+}, { passive: false });
+canvas.addEventListener("touchend", () => { labDragY = null; });
+canvas.addEventListener("wheel", e => {                            // 桌面端滚轮滑动养成页
+  if (state === ST.LAB && labTab === "up") {
+    e.preventDefault();
+    labUpScroll = Math.max(0, Math.min(labUpMaxScroll(), labUpScroll + e.deltaY));
+  }
+}, { passive: false });
+
+addEventListener("keydown", e => {
+  if (e.code === "Escape") {
+    if (state === ST.LOADOUT || state === ST.WIN || state === ST.LOSE || state === ST.LAB) state = ST.MENU;
+  } else if (state === ST.PLAY) {
+    if (e.code.startsWith("Digit")) {
+      const i = +e.code.slice(5) - 1;
+      if (i >= 0 && i < 6 && loadout[i]) { selTrap = selTrap === i ? -1 : i; demolishMode = false; }
+    } else if (e.code === "KeyX") { demolishMode = !demolishMode; if (demolishMode) selTrap = -1; }
+  }
+});
+
+/* ================= 绘制 ================= */
+function drawBtn(b, label, bg, fg, fs) {
+  px(b.x + 3, b.y + 3, b.w, b.h, "rgba(0,0,0,.35)");
+  px(b.x, b.y, b.w, b.h, bg);
+  px(b.x, b.y, b.w, 3, "rgba(255,255,255,.35)");
+  px(b.x, b.y + b.h - 3, b.w, 3, "rgba(0,0,0,.25)");
+  pixelText(label, b.x + b.w / 2, b.y + (b.h - fs) / 2 + 1, fs, fg, "center", false);
+}
+function drawTopBtn(b) {
+  px(b.x + 2, b.y + 2, b.w, b.h, "rgba(0,0,0,.35)");
+  px(b.x, b.y, b.w, b.h, "#554a7a");
+  pixelText(b.label, b.x + b.w / 2, b.y + (b.h - (IS_TOUCH ? 16 : 12)) / 2 + 1, IS_TOUCH ? 16 : 12, "#e8e2ff", "center", false);
+}
+function drawPanel(x, y, w, h) {
+  px(x + 4, y + 4, w, h, "rgba(0,0,0,.4)");
+  px(x, y, w, h, C.panel);
+  px(x, y, w, 3, C.panelE);
+  px(x, y + h - 3, w, 3, "rgba(0,0,0,.35)");
+  px(x, y, 3, h, "rgba(255,255,255,.12)");
+  px(x + w - 3, y, 3, h, "rgba(0,0,0,.35)");
+}
+
+function drawMenu() {
+  px(0, 0, W, H, "#171130");
+  // 背景装饰：淡淡的网格
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    px(GRID_OX + c * CELL + 1, GRID_OY + r * CELL + 1, CELL - 2, CELL - 2, (r + c) % 2 ? "rgba(124,195,83,.06)" : "rgba(124,195,83,.1)");
+  }
+  const fr = Math.floor(menuT * 2) % 2 ? NAILONG_RUNB : NAILONG_BODY;
+  drawSprite(fr, W / 2 - 56, 150, 7, NAILONG_PAL);
+  pixelText("奶龙保卫战", W / 2, 60, 44, "#ffd23f", "center");
+  pixelText("Roguelike 塔防 · 建造机关，守护奶龙", W / 2, 116, 16, "#cfe8ff", "center");
+  pixelText("敌人沿固定路线来袭 · 机关可阻挡 · 升级三选一战略", W / 2, 316, 13, "#8f83c0", "center");
+  drawBtn(BTN_MENU_START, "开始游戏", C.btn, C.btnText, 20);
+  drawBtn(BTN_MENU_LAB, "研发所", "#9fd8ff", "#0e2a4a", 20);
+  pixelText("游戏集 · 第三个游戏", W / 2, 492, 12, "#6f5fa8", "center", false);
+  drawTopBtn(HUB_BTN);
+}
+
+function drawLoadout() {
+  px(0, 0, W, H, "#171130");
+  drawTopBtn(HUB_BTN);
+  pixelText("出战准备", W / 2, 26, 30, "#ffd23f", "center");
+  pixelText("选择携带机关（至多 6 个），出发后随机抽取战斗地图", W / 2, 64, 13, "#8f83c0", "center", false);
+  // 携带槽
+  pixelText("携带栏", 186, 84, 13, "#cfe8ff", "left", false);
+  for (const r of loadoutSlotRects()) {
+    const t = loadout[r.i];
+    px(r.x, r.y, r.w, r.h, t ? "#3a2f66" : "#221a44");
+    px(r.x, r.y, r.w, 2, t ? C.panelE : "#4a3a86");
+    if (t) {
+      if (!drawEntityIcon(t.id, r.x + 6, r.y + 6, 18)) px(r.x + 6, r.y + 6, 18, 18, t.color || "#b8c4d0");
+      pixelText(t.name, r.x + 28, r.y + 8, 12, "#fff", "left", false);
+      pixelText("费用 " + t.cost, r.x + 8, r.y + 40, 11, "#ffe873", "left", false);
+    } else {
+      pixelText("空槽", r.x + r.w / 2, r.y + 26, 12, "#5a4e8a", "center", false);
+    }
+  }
+  // 机关图鉴
+  pixelText("机关图鉴", 186, 194, 13, "#cfe8ff", "left", false);
+  if (!TRAPS.length) {
+    drawPanel(240, 226, 480, 180);
+    pixelText("机关图鉴空空如也", W / 2, 276, 20, "#8f83c0", "center", false);
+    pixelText("等待后续更新加入新机关", W / 2, 312, 14, "#5a4e8a", "center", false);
+    pixelText("（建造 / 经济 / 阻挡 / 战略系统已就绪）", W / 2, 344, 12, "#5a4e8a", "center", false);
+  } else {
+    for (const r of inventoryRects()) {
+      const t = TRAPS[r.i], inLd = loadout.includes(t), locked = !lab.owned[t.id];
+      px(r.x, r.y, r.w, r.h, inLd ? "#3a2f66" : "#221a44");
+      px(r.x, r.y, r.w, 2, inLd ? C.panelE : "#4a3a86");
+      if (locked) ctx.globalAlpha = 0.4;
+      if (!drawEntityIcon(t.id, r.x + 8, r.y + 8, 22)) px(r.x + 8, r.y + 8, 22, 22, t.color || "#b8c4d0");
+      pixelText(t.name, r.x + 38, r.y + 10, 14, "#fff", "left", false);
+      pixelText(`费${t.cost} ${t.heal ? "治疗" : "攻"}${t.atk} 血${t.hp}`, r.x + 8, r.y + 40, 11, "#ffe873", "left", false);
+      pixelText(`阻挡${t.block} ${t.heal ? "范围" : "射程"}${t.range}`, r.x + 8, r.y + 58, 11, "#9fd8ff", "left", false);
+      if (locked) { ctx.globalAlpha = 1; pixelText("未解锁 · 抽卡获得", r.x + 8, r.y + 76, 10, "#ff9aa9", "left", false); }
+    }
+  }
+  drawBtn(BTN_LO_BACK, "返回标题", "#9fd8ff", "#0e2a4a", 17);
+  drawBtn(BTN_LO_GO, "出发！", C.btn, C.btnText, 20);
+  if (hintT > 0) pixelText(hintMsg, W / 2, 430, 14, "#ff9aa9", "center");
+}
+
+/* ---- 战斗场景 ---- */
+function drawField() {
+  const g = CUR.g;
+  // 格子
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const x = GRID_OX + c * CELL, y = GRID_OY + r * CELL, ch = g[r][c];
+    if (ch === "#") {
+      px(x, y, CELL, CELL, (r + c) % 2 ? C.pathD : C.path);
+      px(x + 17, y + 17, 6, 6, "rgba(0,0,0,.12)");
+    } else {
+      px(x, y, CELL, CELL, (r + c) % 2 ? C.grassD : C.grass);
+    }
+  }
+  // 路线方向箭头（所有支线去重后绘制）
+  for (const s of CUR.arrowSegs) pixelText(s.ch, s.x, s.y - 8, 15, "rgba(255,255,255,.4)", "center", false);
+  // 出生点：黑叉
+  for (const sp of CUR.spawns) {
+    const x = GRID_OX + sp.c * CELL, y = GRID_OY + sp.r * CELL;
+    ctx.strokeStyle = "#161616"; ctx.lineWidth = 6; ctx.lineCap = "square";
+    ctx.beginPath();
+    ctx.moveTo(x + 9, y + 9); ctx.lineTo(x + CELL - 9, y + CELL - 9);
+    ctx.moveTo(x + CELL - 9, y + 9); ctx.lineTo(x + 9, y + CELL - 9);
+    ctx.stroke();
+  }
+  // 奶龙格：红底 + 奶龙立绘（待机/跑步慢切换）
+  const fr = Math.floor(gameT * 2) % 2 ? NAILONG_RUNB : NAILONG_BODY;
+  for (const h of CUR.homes) {
+    const x = GRID_OX + h.c * CELL, y = GRID_OY + h.r * CELL;
+    px(x + 1, y + 1, CELL - 2, CELL - 2, C.home);
+    drawSprite(fr, x + 4, y + 4, 2, NAILONG_PAL);
+  }
+  // 网格边框
+  ctx.strokeStyle = "#0d0a1f"; ctx.lineWidth = 3;
+  ctx.strokeRect(GRID_OX - 1.5, GRID_OY - 1.5, COLS * CELL + 3, ROWS * CELL + 3);
+}
+function drawTrap(t) {
+  const x = GRID_OX + t.c * CELL, y = GRID_OY + t.r * CELL;
+  px(x + 1, y + 1, CELL - 2, CELL - 2, "#0d0a1f");          // 底座外框
+  px(x + 3, y + 3, CELL - 6, CELL - 6, "#2a2350");          // 底座面板
+  px(x + 3, y + 3, CELL - 6, 2, "#4a3a86");
+  const sp = SPR[t.base.id];
+  if (sp) {
+    const off = (CELL - 16 * sp.scale) / 2;            // 贴图在格内居中
+    drawSpriteXY(sp.body, x + off, y + off, sp.scale, sp.scale, t.flash > 0 ? sp.wpal : sp.pal);
+  } else {
+    px(x + 5, y + 5, CELL - 10, CELL - 10, t.flash > 0 ? "#ffffff" : (t.base.color || "#b8c4d0"));
+    pixelText(t.base.name[0], x + CELL / 2, y + 10, 15, "#0d0a1f", "center", false);
+  }
+  // 阻挡数指示（路线上）
+  if (t.base.block > 0 && cellChar(t.c, t.r) === "#") {
+    for (let i = 0; i < t.base.block; i++) {
+      px(x + 5 + i * 8, y + CELL - 6, 6, 4, i < t.blocked.length ? "#e33b4e" : "rgba(255,255,255,.5)");
+    }
+  }
+  // 血条（受损时）
+  if (t.hp < t.hpMax) {
+    px(x + 3, y - 4, CELL - 6, 4, "rgba(0,0,0,.5)");
+    px(x + 3, y - 4, (CELL - 6) * Math.max(0, t.hp / t.hpMax), 4, "#7cff6b");
+  }
+  // 冻结指示：冰蓝覆盖 + 白色冰晶十字
+  if (t.frzT > 0) {
+    ctx.globalAlpha = 0.45; px(x + 1, y + 1, CELL - 2, CELL - 2, "#9fe4ff"); ctx.globalAlpha = 1;
+    px(x + CELL / 2 - 1, y + 7, 2, CELL - 14, "#e8fbff");
+    px(x + 7, y + CELL / 2 - 1, CELL - 14, 2, "#e8fbff");
+  }
+}
+function drawEnemy(e) {
+  const s = e.elite ? 1.3 : 1;
+  const x = e.x + e.jx, y = e.y + e.jy;
+  const yUp = y - (e.flying ? AIR_LIFT : 0);
+  const sp = SPR[e.base.id];
+  const bodyW = sp ? 16 * sp.scale * s : 22 * s;                    // 贴图宽度（翅膀 / 血条定位用）
+  if (e.flying) {                                  // 飞行敌人：地面投影 + 扇动的翅膀
+    ctx.globalAlpha = 0.22; px(x - 10, y + 8, 20, 5, "#000"); ctx.globalAlpha = 1;
+    const flap = Math.floor(gameT * 12) % 2 ? -5 : 0;
+    px(x - bodyW / 2 - 8, yUp + flap, 9, 5, "#ffffff");
+    px(x + bodyW / 2 - 1, yUp + flap, 9, 5, "#ffffff");
+    px(x - bodyW / 2 - 6, yUp + flap + 4, 6, 3, "#cfe8ff");
+    px(x + bodyW / 2, yUp + flap + 4, 6, 3, "#cfe8ff");
+  }
+  let topRef;
+  if (sp) {
+    // 果冻挤压：压扁时两侧鼓出（史莱姆的黏黏感），贴图底部贴在路面上
+    const squash = 1 + Math.sin(gameT * 3.2 + e.jx * 0.7) * 0.09;
+    const pw = sp.scale * s / squash, ph = sp.scale * s * squash;
+    const w = 16 * pw, h = 16 * ph;
+    if (!e.flying) { ctx.globalAlpha = 0.18; px(x - 14, yUp + 12, 28, 5, "#000"); ctx.globalAlpha = 1; }
+    drawSpriteXY(sp.body, x - w / 2, yUp + 16 - h, pw, ph, e.flash > 0 ? sp.wpal : sp.pal);
+    topRef = yUp + 16 - h + ph;                                     // 精灵第 1 行（头顶）
+  } else {
+    const w = bodyW, h = 18 * s;
+    px(x - w / 2 - 1, yUp - h / 2 - 1, w + 2, h + 2, e.elite ? "#ffd23f" : "#0d0a1f");   // 描边（精英为金框）
+    px(x - w / 2, yUp - h / 2, w, h, e.flash > 0 ? "#ffffff" : (e.base.color || "#c060ff"));
+    px(x - 5 * s, yUp - 3 * s, 3, 3, "#fff"); px(x + 2 * s, yUp - 3 * s, 3, 3, "#fff");
+    px(x - 4 * s, yUp - 2 * s, 2, 2, "#161616"); px(x + 3 * s, yUp - 2 * s, 2, 2, "#161616");
+    topRef = yUp - h / 2;
+  }
+  if (e.elite) {                                     // 精英标记：头顶小皇冠
+    px(x - 7, topRef - 5, 14, 3, "#ffd23f");
+    px(x - 7, topRef - 8, 3, 3, "#ffd23f");
+    px(x - 1, topRef - 8, 3, 3, "#ffd23f");
+    px(x + 5, topRef - 8, 3, 3, "#ffd23f");
+  }
+  if (e.paraT > 0) {                                 // 麻痹标记：头顶闪烁的电光
+    const tw = Math.floor(gameT * 8) % 2;
+    px(x - 9, topRef - 18 - tw * 2, 4, 4, "#9fe4ff");
+    px(x + 5, topRef - 20 + tw * 2, 4, 4, "#9fe4ff");
+    px(x - 2, topRef - 24, 4, 4, "#e3ccff");
+  }
+  // 血条
+  const bw = 28 * s, by = topRef - 12;
+  px(x - bw / 2, by, bw, 4, "rgba(0,0,0,.5)");
+  px(x - bw / 2, by, bw * Math.max(0, e.hp / e.maxHp), 4, e.elite ? "#ffd23f" : "#ff6b6b");
+}
+function drawFx() {
+  for (const f of fx) {
+    if (f.type === "tracer") {
+      ctx.globalAlpha = Math.min(1, f.ttl / 0.09);
+      ctx.strokeStyle = "#ffe873"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else if (f.type === "heal") {
+      ctx.globalAlpha = Math.max(0, f.ttl / 0.35);
+      ctx.strokeStyle = "#7cff6b"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(f.x1, f.y1); ctx.lineTo(f.x2, f.y2); ctx.stroke();
+      px(f.x2 - 6, f.y2 - 2, 12, 4, "#7cff6b");        // 目标处绿色十字
+      px(f.x2 - 2, f.y2 - 6, 4, 12, "#7cff6b");
+      ctx.globalAlpha = 1;
+    } else if (f.type === "nova") {                  // 水晶球范围攻击：扩散冲击环
+      const k = 1 - f.ttl / 0.3;
+      ctx.globalAlpha = Math.max(0, f.ttl / 0.3) * 0.7;
+      ctx.strokeStyle = "#c9a0ff"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (0.3 + 0.7 * k), 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else if (f.type === "burst") {
+      const k = 1 - f.ttl / 0.5, n = 6;
+      ctx.globalAlpha = Math.max(0, f.ttl / 0.5);
+      for (let i = 0; i < n; i++) {
+        const a = i / n * Math.PI * 2, d = k * 26;
+        px(f.x + Math.cos(a) * d - 2, f.y + Math.sin(a) * d - 2, 4, 4, f.color);
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+function drawHover() {
+  const cell = cellFromPt(mouse);
+  if (!cell) return;
+  const x = GRID_OX + cell.c * CELL, y = GRID_OY + cell.r * CELL;
+  const base = loadout[selTrap];
+  let color = "rgba(255,255,255,.55)";
+  if (demolishMode) color = trapAt(cell.c, cell.r) ? "#ffe873" : "rgba(255,255,255,.3)";
+  else if (base) color = buildableCell(cell.c, cell.r) && coins >= base.cost ? "#7cff6b" : "#ff6b6b";
+  ctx.strokeStyle = color; ctx.lineWidth = 3;
+  ctx.strokeRect(x + 1.5, y + 1.5, CELL - 3, CELL - 3);
+  if (base && !demolishMode && base.range > 0) {   // 射程预览
+    ctx.globalAlpha = 0.1; ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(x + CELL / 2, y + CELL / 2, base.range * CELL, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.35;
+    ctx.beginPath(); ctx.arc(x + CELL / 2, y + CELL / 2, base.range * CELL, 0, Math.PI * 2); ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  // 建造预览：半透明贴图
+  const sp = base ? SPR[base.id] : null;
+  if (sp && !demolishMode && !trapAt(cell.c, cell.r)) {
+    const off = (CELL - 16 * sp.scale) / 2;
+    ctx.globalAlpha = 0.42;
+    drawSpriteXY(sp.body, x + off, y + off, sp.scale, sp.scale, sp.pal);
+    ctx.globalAlpha = 1;
+  }
+}
+function drawHUD() {
+  px(0, 0, W, 64, C.panel);
+  px(0, 64 - 3, W, 3, C.panelE);
+  drawTopBtn(HUB_BTN);
+  const fs = IS_TOUCH ? 22 : 18;
+  // 奶龙币
+  px(168, 20, 16, 16, "#ffd23f"); px(171, 23, 10, 10, "#c98a1e");
+  pixelText(String(Math.floor(coins)), 190, 64 / 2 - fs / 2, fs, "#ffe873", "left", false);
+  // 生命
+  pixelText("♥", 300, 64 / 2 - fs / 2 - 2, fs + 2, "#ff6b6b", "left", false);
+  pixelText(String(life), 326, 64 / 2 - fs / 2, fs, "#ffb3bd", "left", false);
+  // 波次 / 下一波倒计时 / 强化倍率
+  pixelText(`波次 ${waveIdx}`, 400, 64 / 2 - 9, 13, "#9fd8ff", "left", false);
+  pixelText(`下一波 ${Math.max(0, Math.ceil(nextWaveT - gameT))}s`, 490, 64 / 2 - 9, 13, "#8f83c0", "left", false);
+  const wm = waveMul(waveIdx);
+  if (wm > 1) pixelText(`强化 ×${fmtMul(wm)}`, 620, 64 / 2 - 9, 13, "#ff9aa9", "left", false);
+  // 地图名
+  pixelText(CUR.def.name, W - 16, 64 / 2 - 9, 14, "#8f83c0", "right", false);
+}
+function drawSidePanels() {
+  // 左：守卫信息
+  drawPanel(16, GRID_OY, 240, 480);
+  pixelText("守卫", 32, GRID_OY + 14, 16, "#ffd23f", "left", false);
+  pixelText("Lv." + lv + (lv >= LV_MAX ? " MAX" : ""), 140, GRID_OY + 14, 16, "#fff", "left", false);
+  px(32, GRID_OY + 40, 208, 10, "rgba(0,0,0,.45)");
+  px(32, GRID_OY + 40, lv >= LV_MAX ? 208 : 208 * exp / expNeed(), 10, "#7cff6b");
+  pixelText(lv >= LV_MAX ? "已满级" : `${exp}/${expNeed()}`, 136, GRID_OY + 42, 9, "#0d3012", "center", false);
+  const mm = String((gameT / 60) | 0).padStart(2, "0"), ss = String((gameT % 60) | 0).padStart(2, "0");
+  pixelText(`用时 ${mm}:${ss}`, 32, GRID_OY + 62, 12, "#9fd8ff", "left", false);
+  pixelText(`击败 ${kills}`, 150, GRID_OY + 62, 12, "#9fd8ff", "left", false);
+  pixelText("已选战略", 32, GRID_OY + 92, 13, "#ffd23f", "left", false);
+  if (!chosen.length) pixelText("（升级后三选一获得）", 32, GRID_OY + 114, 11, "#5a4e8a", "left", false);
+  chosen.slice(0, 12).forEach((id, i) => {
+    const s = STRATEGIES.find(x => x.id === id);
+    if (s) pixelText("· " + s.name, 32, GRID_OY + 114 + i * 20, 12, "#cfe8ff", "left", false);
+  });
+  // 右：机关详情 / 操作说明
+  drawPanel(W - 256, GRID_OY, 240, 480);
+  const cell = cellFromPt(mouse);
+  const hovT = cell ? trapAt(cell.c, cell.r) : null;
+  const base = hovT ? hovT.base : (loadout[selTrap] ? trapEffBase(loadout[selTrap]) : null);
+  if (base) {
+    pixelText(base.name, W - 240, GRID_OY + 14, 16, "#ffd23f", "left", false);
+    const labLv = lab.lv[base.id] || 1;
+    const L = [
+      `生命 ${hovT ? Math.max(0, Math.ceil(hovT.hp)) + "/" + hovT.hpMax : base.hp}`,
+      `防御 ${base.def}    ${base.heal ? "治疗" : "攻击"} ${base.atk}`,
+      `间隔 ${base.interval}s  阻挡 ${base.block}`,
+      `${base.heal ? "范围" : "射程"} ${base.range}    费用 ${base.cost}`,
+      `研发 Lv.${labLv}${labLv >= TRAP_LV_MAX ? " MAX" : ""}`
+    ];
+    L.forEach((s, i) => pixelText(s, W - 240, GRID_OY + 44 + i * 22, 12, "#cfe8ff", "left", false));
+    if (base.skill) pixelText("技能：" + base.skill, W - 240, GRID_OY + 164, 11, "#7cff6b", "left", false);
+    wrapText(base.desc || "", 14).slice(0, 5).forEach((s, i) =>
+      pixelText(s, W - 240, GRID_OY + (base.skill ? 188 : 164) + i * 18, 11, "#8f83c0", "left", false));
+  } else {
+    pixelText("操作说明", W - 240, GRID_OY + 14, 15, "#ffd23f", "left", false);
+    const tips = [
+      "点击机关卡 → 点格子建造",
+      "建在路线上的机关",
+      "  可以阻挡敌人前进",
+      "点「拆除」→ 点机关拆除",
+      "  返还 50% 建造费用",
+      "敌人抵达奶龙格：生命-1",
+      "击败敌人得经验可升级",
+      "  升级时三选一战略",
+      "",
+      "敌人分波次来袭",
+      "  第 5 波后生命/攻击",
+      "  逐波提升，可叠加",
+      "飞行敌人不被阻挡",
+      "  只有远程机关能打"
+    ];
+    tips.forEach((s, i) => pixelText(s, W - 240, GRID_OY + 42 + i * 21, 11, i >= 9 ? "#e8a13f" : "#8f83c0", "left", false));
+  }
+}
+function drawBar() {
+  px(0, BAR_Y, W, H - BAR_Y, C.panel);
+  px(0, BAR_Y, W, 3, C.panelE);
+  // 左：当前选择 / 提示
+  const base = loadout[selTrap];
+  if (demolishMode) pixelText("拆除模式：点击机关拆除", 16, BAR_Y + 40, 13, "#ff9aa9", "left", false);
+  else if (base) pixelText(`已选：${base.name}（费用 ${base.cost}）`, 16, BAR_Y + 40, 13, "#ffe873", "left", false);
+  else if (!loadout.length) pixelText("暂无可用机关，等待后续更新", 16, BAR_Y + 40, 13, "#5a4e8a", "left", false);
+  else pixelText("点击下方机关卡选择要建造的机关", 16, BAR_Y + 40, 13, "#8f83c0", "left", false);
+  // 机关槽
+  for (const r of slotRects()) {
+    const t = loadout[r.i], sel = r.i === selTrap;
+    px(r.x, r.y, r.w, r.h, t ? (sel ? "#5a4a96" : "#3a2f66") : "#221a44");
+    if (sel) { px(r.x, r.y, r.w, 3, C.panelE); px(r.x, r.y + r.h - 3, r.w, 3, C.panelE); px(r.x, r.y, 3, r.h, C.panelE); px(r.x + r.w - 3, r.y, 3, r.h, C.panelE); }
+    if (t) {
+      if (!drawEntityIcon(t.id, r.x + 6, r.y + 6, 20)) px(r.x + 6, r.y + 6, 20, 20, t.color || "#b8c4d0");
+      pixelText(t.name.slice(0, 4), r.x + 30, r.y + 8, 10, "#fff", "left", false);
+      const afford = coins >= t.cost;
+      pixelText("◈" + t.cost, r.x + 6, r.y + 38, 11, afford ? "#ffe873" : "#8a7a5a", "left", false);
+      const bn = builtCount(t.id);                       // 已建数量 / 上限
+      pixelText(`${bn}/${TRAP_BUILD_CAP}`, r.x + r.w - 6, r.y + 38, 10, bn >= TRAP_BUILD_CAP ? "#ff9aa9" : "#8f83c0", "right", false);
+    } else {
+      pixelText("空", r.x + r.w / 2, r.y + 22, 12, "#5a4e8a", "center", false);
+    }
+  }
+  // 拆除按钮
+  drawBtn(DEMOLISH_BTN, demolishMode ? "取消拆除" : "拆除", demolishMode ? "#e33b4e" : "#554a7a", "#fff", 14);
+}
+function drawPlay() {
+  px(0, 0, W, H, "#171130");
+  drawField();
+  for (const t of traps) drawTrap(t);
+  for (const e of enemies) drawEnemy(e);
+  drawFx();
+  drawHover();
+  drawHUD();
+  drawSidePanels();
+  drawBar();
+  if (hintT > 0) pixelText(hintMsg, W / 2, BAR_Y - 26, 15, "#ff9aa9", "center");
+  if (waveBannerT > 0) {                             // 波次来袭横幅
+    const wm = waveMul(waveIdx);
+    ctx.globalAlpha = Math.min(1, waveBannerT / 0.6);
+    drawPanel(W / 2 - 250, 212, 500, 76);
+    pixelText(`第 ${waveIdx} 波来袭！`, W / 2, 230, 20, "#ffd23f", "center", false);
+    pixelText(wm > 1 ? `敌人强化：生命 / 攻击 / 防御 ×${fmtMul(wm)}` : "敌军正在逼近，建造机关守住路线",
+      W / 2, 262, 13, wm > 1 ? "#ff9aa9" : "#cfe8ff", "center", false);
+    ctx.globalAlpha = 1;
+  }
+}
+function drawStrat() {
+  drawPlay();                      // 战斗画面定格做底
+  ctx.globalAlpha = 0.72; px(0, 0, W, H, "#0d0a1f"); ctx.globalAlpha = 1;
+  pixelText(`守卫升至 Lv.${lv}！`, W / 2, 96, 30, "#ffd23f", "center");
+  pixelText("选择一项战略协助战斗", W / 2, 140, 15, "#cfe8ff", "center", false);
+  for (const r of stratCardRects()) {
+    const o = stratOpts[r.i];
+    if (!o) continue;
+    drawPanel(r.x, r.y, r.w, r.h);
+    px(r.x + r.w / 2 - 16, r.y + 18, 32, 32, o.scope === "global" ? "#7cff6b" : "#9fd8ff");
+    pixelText(o.name, r.x + r.w / 2, r.y + 62, 18, "#ffd23f", "center", false);
+    pixelText(o.scope === "global" ? "通用战略" : "机关战略", r.x + r.w / 2, r.y + 90, 11, o.scope === "global" ? "#7cff6b" : "#9fd8ff", "center", false);
+    wrapText(o.desc, 12).slice(0, 5).forEach((s, i) =>
+      pixelText(s, r.x + r.w / 2, r.y + 118 + i * 20, 12, "#e8e2ff", "center", false));
+  }
+}
+function drawEnd(win) {
+  drawPlay();
+  ctx.globalAlpha = 0.72; px(0, 0, W, H, "#0d0a1f"); ctx.globalAlpha = 1;
+  drawPanel(W / 2 - 220, 150, 440, 250);
+  pixelText(win ? "保卫成功！" : "奶龙被击倒了…", W / 2, 176, 30, win ? "#ffd23f" : "#ff6b6b", "center");
+  const mm = String((gameT / 60) | 0).padStart(2, "0"), ss = String((gameT % 60) | 0).padStart(2, "0");
+  pixelText(`地图：${CUR.def.name}`, W / 2, 228, 14, "#cfe8ff", "center", false);
+  pixelText(`用时 ${mm}:${ss}   击败 ${kills}   守卫 Lv.${lv}`, W / 2, 254, 14, "#cfe8ff", "center", false);
+  const passed = win ? waveIdx : waveIdx - 1;
+  pixelText(`通过波次 ${passed} · 已选战略 ${chosen.length} 项`, W / 2, 278, 12, "#8f83c0", "center", false);
+  pixelText(endReward > 0 ? `奶石 +${endReward}（本周 ${lab.wkStone}/${WEEK_STONE_MAX}）`
+    : (passed < 10 ? "奶石 +0（通过 10 波起可获得）" : `奶石 +0（本周上限 ${WEEK_STONE_MAX} 已达）`),
+    W / 2, 300, 13, "#ffc7e6", "center", false);
+  pixelText(endTaskReward > 0 ? `每日任务完成！奶石 +${endTaskReward}`
+    : `每日任务：消灭敌人 ${lab.dayDone ? DAY_KILL_NEED : Math.min(lab.dayKills, DAY_KILL_NEED)}/${DAY_KILL_NEED}` + (lab.dayDone ? " ✓" : ""),
+    W / 2, 322, 12, endTaskReward > 0 ? "#7cff6b" : "#8f83c0", "center", false);
+  drawBtn(BTN_END_AGAIN, "再来一局", C.btn, C.btnText, 17);
+  drawBtn(BTN_END_HUB, "返回大厅", "#ff9aa9", "#5a1020", 17);
+}
+
+/* ---- 研发所（养成 / 抽卡） ---- */
+function drawLabCurrency() {
+  px(W - 330, 16, 16, 16, "#c98a1e"); px(W - 327, 19, 10, 10, "#ffe873");     // 材料
+  pixelText("材料 " + lab.mat, W - 308, 18, 14, "#ffe873", "left", false);
+  px(W - 186, 15, 18, 18, "#ff9fd0"); px(W - 182, 19, 10, 10, "#fff");        // 奶石
+  pixelText("奶石 " + lab.stone, W - 160, 18, 14, "#ffc7e6", "left", false);
+}
+function drawLabUp() {          // 养成页：机关升级卡片（内容超出视口可滚动）
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, LAB_UP_VIEW_Y, W, H - LAB_UP_VIEW_Y); ctx.clip();
+  for (const r of labUpCardRects()) {
+    const ry = r.y - labUpScroll;
+    if (ry + r.h < LAB_UP_VIEW_Y || ry > H) continue;              // 视口外不画
+    const t = TRAPS[r.i], lvN = lab.lv[t.id] || 1, locked = !lab.owned[t.id];
+    drawPanel(r.x, ry, r.w, r.h);
+    if (locked) ctx.globalAlpha = 0.4;
+    drawEntityIcon(t.id, r.x + r.w / 2 - 32, ry + 22, 64);
+    pixelText(t.name, r.x + r.w / 2, ry + 100, 18, "#ffd23f", "center", false);
+    ctx.globalAlpha = 1;
+    pixelText("Lv." + lvN + (lvN >= TRAP_LV_MAX ? " MAX" : ""), r.x + r.w / 2, ry + 126, 14,
+      lvN >= TRAP_LV_MAX ? "#7cff6b" : "#cfe8ff", "center", false);
+    const cur = trapEffBase(t), atkLabel = t.heal ? "治疗" : "攻击";
+    pixelText(`生命 ${cur.hp}`, r.x + r.w / 2, ry + 158, 13, "#e8e2ff", "center", false);
+    pixelText(`防御 ${cur.def}    ${atkLabel} ${cur.atk}`, r.x + r.w / 2, ry + 182, 13, "#e8e2ff", "center", false);
+    if (locked) {
+      pixelText("未解锁 · 抽卡获得", r.x + r.w / 2, ry + 220, 12, "#ff9aa9", "center", false);
+    } else if (lvN < TRAP_LV_MAX) {
+      const m2 = 1 + LAB_LV_STEP * lvN;                            // 下一级倍率
+      pixelText(`下级：生命 ${Math.round(t.hp * m2)}  防御 ${Math.round(t.def * m2)}  ${atkLabel} ${Math.round(t.atk * m2)}`,
+        r.x + r.w / 2, ry + 214, 11, "#9fd8ff", "center", false);
+      const b = { x: r.x + 60, y: ry + r.h - 66, w: 200, h: 48 }, cost = upCostOf(t.id), afford = lab.mat >= cost;
+      drawBtn(b, `升级（材料×${cost}）`, afford ? C.btn : "#554a7a", afford ? C.btnText : "#8f83c0", 14);
+      pixelText(`现有材料 ${lab.mat}`, r.x + r.w / 2, b.y + 56, 11, "#8f83c0", "center", false);
+    } else {
+      pixelText("已满级", r.x + r.w / 2, ry + 220, 14, "#7cff6b", "center", false);
+    }
+  }
+  ctx.restore();
+  const ms = labUpMaxScroll();                                     // 右侧滚动条（可滚动时显示）
+  if (ms > 0) {
+    const vh = H - LAB_UP_VIEW_Y, sh = Math.max(40, vh * vh / (vh + ms));
+    px(W - 8, LAB_UP_VIEW_Y + (vh - sh) * labUpScroll / ms, 5, sh, "rgba(255,255,255,.35)");
+  }
+}
+function drawLabGacha() {       // 抽卡页
+  if (!lab.gachaGift) {         // 首次进入抽卡界面：赠送奶石（一次性）
+    lab.gachaGift = true; lab.stone += GACHA_GIFT; saveLab();
+    hint(`首次进入抽卡界面，奶石 +${GACHA_GIFT}`);
+  }
+  drawPanel(W / 2 - 280, 116, 560, 400);
+  pixelText("机关扭蛋", W / 2, 140, 22, "#ffd23f", "center", false);
+  pixelText(`奶石 ${lab.stone}`, W / 2, 182, 18, "#ffc7e6", "center", false);
+  const info = [
+    ["卡池内容：", "#ffd23f"],
+    [`· 卡池限定机关（重复→材料×${DUP_TO_MAT}） 2%`, "#cfe8ff"],
+    [`· 普通机关（重复→材料×${DUP_TO_MAT_TRAP}） 6%`, "#cfe8ff"],
+    ["· 材料×1  92%", "#cfe8ff"],
+    [`保底：${PITY_TRAP + 1} 抽内必出机关 · ${PITY_LTD + 1} 抽内必出限定机关`, "#9fd8ff"],
+    [`当前 ${lab.pityAny} 抽未出机关 / ${lab.pityLtd} 抽未出限定`, "#8f83c0"],
+    ["材料用于「养成」页升级机关（至多 Lv.5）", "#8f83c0"]
+  ];
+  info.forEach((ln, i) => pixelText(ln[0], W / 2 - 230, 226 + i * 24, 13, ln[1], "left", false));
+  const ok1 = lab.stone >= DRAW_COST, ok10 = lab.stone >= DRAW_COST * 10;
+  drawBtn(BTN_DRAW1, "抽一次", ok1 ? C.btn : "#554a7a", ok1 ? C.btnText : "#8f83c0", 18);
+  drawBtn(BTN_DRAW10, "抽十次", ok10 ? C.btn : "#554a7a", ok10 ? C.btnText : "#8f83c0", 18);
+  pixelText(`◈${DRAW_COST}`, BTN_DRAW1.x + BTN_DRAW1.w / 2, BTN_DRAW1.y + 66, 12, "#ffc7e6", "center", false);
+  pixelText(`◈${DRAW_COST * 10}`, BTN_DRAW10.x + BTN_DRAW10.w / 2, BTN_DRAW10.y + 66, 12, "#ffc7e6", "center", false);
+}
+function drawGachaResult() {    // 抽卡结果展示（点击任意处关闭）
+  ctx.globalAlpha = 0.78; px(0, 0, W, H, "#0d0a1f"); ctx.globalAlpha = 1;
+  const items = labResult, cols = 5, rows = Math.ceil(items.length / cols);
+  const cw = 150, ch = 132, gap = 16;
+  const pw = cols * cw + (cols - 1) * gap + 80, ph = rows * ch + (rows - 1) * gap + 130;
+  const x0 = (W - pw) / 2, y0 = (H - ph) / 2;
+  drawPanel(x0, y0, pw, ph);
+  pixelText("抽卡结果", W / 2, y0 + 20, 20, "#ffd23f", "center", false);
+  items.forEach((it, i) => {
+    const r = (i / cols) | 0, c = i % cols;
+    const x = x0 + 40 + c * (cw + gap), y = y0 + 64 + r * (ch + gap);
+    px(x, y, cw, ch, "#221a44"); px(x, y, cw, 2, "#4a3a86");
+    if (it.type === "trap") {
+      const t = TRAPS.find(v => v.id === it.id);
+      drawEntityIcon(it.id, x + cw / 2 - 24, y + 14, 48);
+      pixelText(t ? t.name : it.id, x + cw / 2, y + 70, 14, "#ffd23f", "center", false);
+      pixelText(it.dup ? `重复 → 材料×${it.conv}` : "NEW！新机关", x + cw / 2, y + 96, 11,
+        it.dup ? "#8f83c0" : "#7cff6b", "center", false);
+    } else {
+      px(x + cw / 2 - 18, y + 20, 36, 36, "#c98a1e"); px(x + cw / 2 - 12, y + 26, 24, 24, "#ffe873");
+      pixelText("材料", x + cw / 2, y + 70, 14, "#ffe873", "center", false);
+      pixelText("×" + it.n, x + cw / 2, y + 96, 13, "#fff", "center", false);
+    }
+  });
+  pixelText("点击任意处关闭", W / 2, y0 + ph - 34, 12, "#8f83c0", "center", false);
+}
+function drawLab() {
+  px(0, 0, W, H, "#171130");
+  drawTopBtn(BTN_LAB_BACK);
+  pixelText("研发所", W / 2, 14, 26, "#ffd23f", "center");
+  drawLabCurrency();
+  drawBtn(BTN_TAB_UP, "养成", labTab === "up" ? C.btn : "#554a7a", labTab === "up" ? C.btnText : "#e8e2ff", 17);
+  drawBtn(BTN_TAB_GA, "抽卡", labTab === "gacha" ? C.btn : "#554a7a", labTab === "gacha" ? C.btnText : "#e8e2ff", 17);
+  if (labTab === "up") drawLabUp(); else drawLabGacha();
+  if (hintT > 0) pixelText(hintMsg, W / 2, H - 30, 14, "#ff9aa9", "center");
+  if (labResult) drawGachaResult();
+}
+
+function render() {
+  if (state === ST.MENU) drawMenu();
+  else if (state === ST.LOADOUT) drawLoadout();
+  else if (state === ST.PLAY) drawPlay();
+  else if (state === ST.STRAT) drawStrat();
+  else if (state === ST.LAB) drawLab();
+  else if (state === ST.WIN) drawEnd(true);
+  else if (state === ST.LOSE) drawEnd(false);
+}
+
+/* ================= 移动端画布适配（与跑酷/蛋糕同方案） =================
+   纯 CSS 视口单位在微信等内置浏览器里不可靠，用 JS 读 innerWidth/innerHeight 精确计算；
+   竖屏时把 #wrap 旋转 90° 模拟横屏，让画布尽量铺满整屏。 */
+let wrapRotated = false;
+function layoutWrap(w, h, touch) {
+  const wrap = document.getElementById("wrap");
+  if (!touch) { wrap.style.width = ""; wrap.style.transform = ""; wrapRotated = false; return; }
+  wrapRotated = h > w;
+  const cw = wrapRotated ? Math.min(w * 16 / 9, h) : Math.min(w, h * 16 / 9);
+  wrap.style.width = Math.round(cw) + "px";
+  wrap.style.transform = wrapRotated ? "rotate(90deg)" : "none";
+}
+function fitWrap() { layoutWrap(innerWidth, innerHeight, IS_TOUCH); }
+addEventListener("resize", fitWrap);
+addEventListener("orientationchange", fitWrap);
+fitWrap();
+
+/* ================= 主循环 ================= */
+let last = 0;
+function frame(ts) {
+  const dt = Math.min(0.05, (ts - last) / 1000 || 0);
+  last = ts;
+  menuT += dt;
+  if (state === ST.PLAY) update(dt);
+  else if (hintT > 0) hintT -= dt;          // 非战斗界面的提示也要消退
+  render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
