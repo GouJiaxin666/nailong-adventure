@@ -506,9 +506,13 @@ function loadLab() {
       if (s.owned && t.id in s.owned) d.owned[t.id] = !!s.owned[t.id];   // 存档为准；未来新机关默认未拥有
       if (s.lv && s.lv[t.id] >= 1) d.lv[t.id] = Math.min(TRAP_LV_MAX, s.lv[t.id] | 0);
     }
+  } else {
+    // 全新存档：首次启动赠送奶石，弹窗展示（惊喜感）
+    giftPop = { title: "欢迎来到奶龙保卫战！", amount: STONE_START, sub: "首次冒险赠送奶石" };
   }
   return d;
 }
+let giftPop = null;            // 首次赠送奶石弹窗 {title, amount, sub}（点击任意处收下）
 let lab = loadLab();
 function saveLab() { storeSet(LAB_SAVE_KEY, JSON.stringify(lab)); }
 /* 研发等级加成倍率与生效属性（费用/攻击间隔/射程/阻挡不变） */
@@ -957,6 +961,7 @@ const cellFromPt = p => {
 
 function onPointerDown(p) {
   mouse = p;
+  if (giftPop) { giftPop = null; return; }                     // 赠送弹窗展示中：点击任意处收下
   if (state === ST.MENU) {
     if (hitR(p, HUB_BTN)) { location.href = "../index.html"; return; }
     if (hitR(p, BTN_MENU_START)) { state = ST.LOADOUT; return; }
@@ -1129,14 +1134,16 @@ function drawLoadout() {
     pixelText("（建造 / 经济 / 阻挡 / 战略系统已就绪）", W / 2, 344, 12, "#5a4e8a", "center", false);
   } else {
     for (const r of inventoryRects()) {
-      const t = TRAPS[r.i], inLd = loadout.includes(t), locked = !lab.owned[t.id];
+      const t = TRAPS[r.i], eb = trapEffBase(t), lv = lab.lv[t.id] || 1;   // 卡面属性随研发等级变化
+      const inLd = loadout.includes(t), locked = !lab.owned[t.id];
       px(r.x, r.y, r.w, r.h, inLd ? "#3a2f66" : "#221a44");
       px(r.x, r.y, r.w, 2, inLd ? C.panelE : "#4a3a86");
       if (locked) ctx.globalAlpha = 0.4;
       if (!drawEntityIcon(t.id, r.x + 8, r.y + 8, 22)) px(r.x + 8, r.y + 8, 22, 22, t.color || "#b8c4d0");
       pixelText(t.name, r.x + 38, r.y + 10, 14, "#fff", "left", false);
-      pixelText(`费${t.cost} ${t.heal ? "治疗" : "攻"}${t.atk} 血${t.hp}`, r.x + 8, r.y + 40, 11, "#ffe873", "left", false);
-      pixelText(`阻挡${t.block} ${t.heal ? "范围" : "射程"}${t.range}`, r.x + 8, r.y + 58, 11, "#9fd8ff", "left", false);
+      if (lv > 1) pixelText(`Lv.${lv}`, r.x + r.w - 8, r.y + 10, 11, "#7cff6b", "right", false);
+      pixelText(`费${eb.cost} ${eb.heal ? "治疗" : "攻"}${eb.atk} 血${eb.hp}`, r.x + 8, r.y + 40, 11, "#ffe873", "left", false);
+      pixelText(`阻挡${eb.block} ${eb.heal ? "范围" : "射程"}${eb.range}`, r.x + 8, r.y + 58, 11, "#9fd8ff", "left", false);
       if (locked) { ctx.globalAlpha = 1; pixelText("未解锁 · 抽卡获得", r.x + 8, r.y + 76, 10, "#ff9aa9", "left", false); }
     }
   }
@@ -1522,9 +1529,9 @@ function drawLabUp() {          // 养成页：机关升级卡片（内容超出
   }
 }
 function drawLabGacha() {       // 抽卡页
-  if (!lab.gachaGift) {         // 首次进入抽卡界面：赠送奶石（一次性）
+  if (!lab.gachaGift) {         // 首次进入抽卡界面：赠送奶石（一次性，弹窗展示）
     lab.gachaGift = true; lab.stone += GACHA_GIFT; saveLab();
-    hint(`首次进入抽卡界面，奶石 +${GACHA_GIFT}`);
+    giftPop = { title: "首次抽卡贺礼", amount: GACHA_GIFT, sub: "首次进入抽卡界面赠送奶石" };
   }
   drawPanel(W / 2 - 280, 116, 560, 400);
   pixelText("机关扭蛋", W / 2, 140, 22, "#ffd23f", "center", false);
@@ -1591,6 +1598,20 @@ function render() {
   else if (state === ST.LAB) drawLab();
   else if (state === ST.WIN) drawEnd(true);
   else if (state === ST.LOSE) drawEnd(false);
+  if (giftPop) drawGiftPop();              // 赠送弹窗覆盖在最上层
+}
+function drawGiftPop() {        // 首次赠送奶石弹窗（点击任意处收下）
+  ctx.globalAlpha = 0.78; px(0, 0, W, H, "#0d0a1f"); ctx.globalAlpha = 1;
+  const pw = 460, ph = 280, x0 = (W - pw) / 2, y0 = (H - ph) / 2;
+  drawPanel(x0, y0, pw, ph);
+  const bx = W / 2 - 24, by = y0 + 44;                          // 像素礼盒
+  px(bx, by + 12, 48, 36, "#c0455e"); px(bx - 3, by, 54, 14, "#e05a7a");
+  px(bx + 21, by - 4, 6, 52, "#ffe873");
+  px(bx + 11, by - 10, 10, 8, "#ffe873"); px(bx + 27, by - 10, 10, 8, "#ffe873");
+  pixelText(giftPop.title, W / 2, y0 + 130, 22, "#ffd23f", "center", true);
+  pixelText(`奶石 +${giftPop.amount}`, W / 2, y0 + 170, 28, "#ffc7e6", "center", true);
+  pixelText(giftPop.sub, W / 2, y0 + 204, 13, "#9fd8ff", "center", false);
+  pixelText("点击任意处收下", W / 2, y0 + ph - 26, 12, "#8f83c0", "center", false);
 }
 
 /* ================= 移动端画布适配（与跑酷/蛋糕同方案） =================
