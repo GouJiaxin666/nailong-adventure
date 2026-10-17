@@ -524,6 +524,49 @@ const WAVE_CFG = {
   scaleMul: 1.1, maxWave: Infinity          // scaleMul: 第5波后每波 生命/攻击/防御 ×1.1（复利）
 };
 
+/* ================= 音频：WebAudio 实时合成（无外部资源，保持单文件） ================= */
+let AC = null;
+function ac() {
+  if (!AC) { const A = window.AudioContext || window.webkitAudioContext; if (A) { try { AC = new A(); } catch (e) {} } }
+  if (AC && AC.state === "suspended") AC.resume();
+  return AC;
+}
+function tone(freq, delay, dur, type, vol, freqEnd) {
+  const a = ac(); if (!a) return;
+  const t0 = a.currentTime + delay, o = a.createOscillator(), g = a.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  if (freqEnd) o.frequency.exponentialRampToValueAtTime(Math.max(1, freqEnd), t0 + dur);
+  g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(a.destination); o.start(t0); o.stop(t0 + dur + 0.02);
+}
+function noiseBurst(dur, vol, freq, q) {                       // 滤波噪声（碎裂/爆炸质感）
+  const a = ac(); if (!a) return;
+  const n = Math.floor(a.sampleRate * dur), buf = a.createBuffer(1, n, a.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  const src = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain(), t0 = a.currentTime;
+  src.buffer = buf; f.type = "lowpass"; f.frequency.value = freq; f.Q.value = q || 1;
+  g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(f); f.connect(g); g.connect(a.destination); src.start(t0);
+}
+function sfxEnemyDie() { tone(520, 0, 0.1, "square", 0.12, 120); tone(760, 0, 0.06, "square", 0.06, 300); }   // 敌人被击败：短促下坠"啵"
+function sfxTrapDie() { noiseBurst(0.22, 0.16, 900, 0.8); tone(180, 0, 0.25, "sawtooth", 0.12, 50); }          // 机关被击败：低沉碎裂（与敌败区分）
+function sfxGacha() { [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.07, 0.12, "square", 0.08)); }      // 抽卡：上扬琶音
+/* 背景音乐：方波主旋律 + 三角波低音的循环音序器（首次点击页面后启动，贯穿全局） */
+const BGM_LEAD = [659, 0, 784, 0, 1047, 0, 784, 0, 880, 0, 784, 0, 659, 0, 587, 0,
+                  659, 0, 784, 0, 880, 0, 784, 0, 659, 0, 587, 0, 523, 0, 0, 0];
+const BGM_BASS = [131, 131, 98, 98, 110, 110, 98, 98, 87, 87, 98, 98, 131, 131, 98, 98];
+let bgmTimer = null, bgmStep = 0;
+function startBGM() {
+  if (bgmTimer || !ac()) return;
+  bgmTimer = setInterval(() => {
+    const a = ac(); if (!a || a.state !== "running") return;
+    const L = BGM_LEAD[bgmStep % BGM_LEAD.length], B = BGM_BASS[(bgmStep >> 1) % BGM_BASS.length];
+    if (L) tone(L, 0, 0.16, "square", 0.045);
+    if (bgmStep % 2 === 0 && B) tone(B, 0, 0.3, "triangle", 0.07);
+    bgmStep++;
+  }, 170);
+}
+
 /* ================= 战略（升级三选一） =================
    scope: "global" 通用战略 | "trap" 机关战略（需携带对应机关才会刷新，trap 字段为机关id）
    apply(mods)：直接修改全局增益对象；onPick()：选择时一次性生效（可选）。
@@ -617,6 +660,7 @@ function loadLab() {
 }
 let giftPop = null;            // 首次赠送奶石弹窗 {title, amount, sub}（点击任意处收下）
 let packOpen = false, packSel = -1;   // 新手礼包：面板打开 / 选中的卡池限定机关下标
+let poolOpen = false;                 // 卡池详情面板（抽卡页，点击任意处关闭）
 /* 新手礼包：从所有卡池限定机关中任选其一（已拥有的转换为材料×20），领取后标题页入口永久消失 */
 function claimPack() {
   const t = ltdPool()[packSel];
@@ -685,6 +729,7 @@ function drawGacha(times) {
   }
   saveLab();
   labResult = items;
+  sfxGacha();                       // 抽卡音效（上扬琶音）
   return true;
 }
 /* ---- 奶石获取：战斗结算 / 每日任务 ---- */
@@ -931,6 +976,7 @@ function hurtEnemy(e, dmg) {
   e.hp -= dmg; e.flash = 0.1;
   if (e.hp <= 0 && !e.dead) {
     e.dead = true; kills++; lab.rookie.kills++;        // rookie.kills：新手任务（累计消灭），随结算落盘
+    sfxEnemyDie();
     gainExp(e.base.exp);
     fx.push({ type: "burst", x: e.x + e.jx, y: e.y + e.jy, ttl: 0.4, color: e.base.color || "#c060ff" });
   }
@@ -963,6 +1009,7 @@ function update(dt) {
           if (e.base.freeze && t.hp > 0) t.frzT = Math.max(t.frzT, FREEZE_TIME * (1 - resOf(t.base, "frz")));   // 雪人：攻击使机关冻结（冻结抗性按百分比缩短）
           if (t.hp <= 0) {
             t.dead = true;
+            sfxTrapDie();                              // 机关被击败音效（低沉碎裂）
             for (const b of t.blocked) b.blockedBy = null;
             t.blocked.length = 0;
             fx.push({ type: "burst", x: t.x, y: t.y, ttl: 0.4, color: "#b8c4d0" });
@@ -1118,6 +1165,7 @@ const BTN_TAB_UP = { x: W / 2 - 210, y: 56, w: 200, h: 42 };
 const BTN_TAB_GA = { x: W / 2 + 10,  y: 56, w: 200, h: 42 };
 const BTN_DRAW1  = { x: W / 2 - 230, y: 416, w: 210, h: 58 };
 const BTN_DRAW10 = { x: W / 2 + 20,  y: 416, w: 210, h: 58 };
+const BTN_POOL   = { x: W / 2 + 138, y: 126, w: 130, h: 32 };   // 卡池详情入口（抽卡页右上）
 const DEMOLISH_BTN = { x: W - 126, y: 579, w: 110, h: 46 };
 function hitR(p, b) { return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h; }
 
@@ -1173,6 +1221,8 @@ const cellFromPt = p => {
 function onPointerDown(p) {
   mouse = p;
   if (giftPop) { giftPop = null; return; }                     // 赠送弹窗展示中：点击任意处收下
+  startBGM();                                                  // 首次交互启动背景音乐（自动播放策略）
+  if (poolOpen) { poolOpen = false; return; }                  // 卡池详情展示中：点击任意处关闭
   if (packOpen) {                                              // 新手礼包面板：屏蔽底层点击
     if (hitR(p, BTN_PACK_NO)) { packOpen = false; packSel = -1; return; }
     for (const r of packCardRects()) if (hitR(p, r)) { packSel = r.i; return; }
@@ -1233,6 +1283,7 @@ function onPointerDown(p) {
     } else {
       if (hitR(p, BTN_DRAW1)) { drawGacha(1); return; }
       if (hitR(p, BTN_DRAW10)) { drawGacha(10); return; }
+      if (hitR(p, BTN_POOL)) { poolOpen = true; return; }
     }
   } else if (state === ST.WIN || state === ST.LOSE) {
     if (hitR(p, BTN_END_AGAIN)) { state = ST.LOADOUT; return; }
@@ -1781,6 +1832,7 @@ function drawLabGacha() {       // 抽卡页
   }
   drawPanel(W / 2 - 280, 116, 560, 400);
   pixelText("机关扭蛋", W / 2, 140, 22, "#ffd23f", "center", false);
+  drawBtn(BTN_POOL, "卡池详情", "#4a3a86", "#e8e0ff", 14);
   pixelText(`奶石 ${lab.stone}`, W / 2, 182, 18, "#ffc7e6", "center", false);
   const info = [
     ["卡池内容：", "#ffd23f"],
@@ -1797,6 +1849,32 @@ function drawLabGacha() {       // 抽卡页
   drawBtn(BTN_DRAW10, "抽十次", ok10 ? C.btn : "#554a7a", ok10 ? C.btnText : "#8f83c0", 18);
   pixelText(`◈${DRAW_COST}`, BTN_DRAW1.x + BTN_DRAW1.w / 2, BTN_DRAW1.y + 66, 12, "#ffc7e6", "center", false);
   pixelText(`◈${DRAW_COST * 10}`, BTN_DRAW10.x + BTN_DRAW10.w / 2, BTN_DRAW10.y + 66, 12, "#ffc7e6", "center", false);
+}
+
+/* ---- 卡池详情：全部内容物与概率（点击任意处关闭） ---- */
+function drawPool() {
+  ctx.globalAlpha = 0.8; px(0, 0, W, H, "#0d0a1f"); ctx.globalAlpha = 1;
+  const pw = 760, ph = 480, x0 = (W - pw) / 2, y0 = (H - ph) / 2;
+  drawPanel(x0, y0, pw, ph);
+  pixelText("卡池详情", W / 2, y0 + 34, 22, "#ffd23f", "center", false);
+  const fmtP = v => v.toFixed(2).replace(/\.?0+$/, "") + "%";          // 1 / 1.5 → "1%" / "1.5%"
+  const ltd = ltdPool(), nml = normalPool();
+  const drawRow = (list, totalPct, color, label, iconY) => {
+    pixelText(label, x0 + 30, iconY - 18, 14, color, "left", false);
+    const cw = 130, sx = W / 2 - list.length * cw / 2;
+    list.forEach((t, i) => {
+      const cx = sx + i * cw + cw / 2;
+      drawEntityIcon(t.id, cx - 20, iconY, 40);
+      pixelText(t.name, cx, iconY + 56, 14, "#ffd23f", "center", false);
+      pixelText(`单款 ${fmtP(totalPct / list.length)}`, cx, iconY + 74, 11, "#9fd8ff", "center", false);
+    });
+  };
+  drawRow(ltd, 2, "#c9a0ff", `卡池限定机关 · 合计 2%（等概率，重复→材料×${DUP_TO_MAT}）`, y0 + 86);
+  drawRow(nml, 6, "#cfe8ff", `普通机关 · 合计 6%（等概率，重复→材料×${DUP_TO_MAT_TRAP}）`, y0 + 224);
+  pixelText("材料×1 · 92%（用于「养成」页升级机关）", x0 + 30, y0 + 332, 14, "#8f83c0", "left", false);
+  pixelText(`保底：连续 ${PITY_TRAP} 次未出任何机关，下一抽必出机关；连续 ${PITY_LTD} 次未出限定机关，`, x0 + 30, y0 + 364, 12, "#9fd8ff", "left", false);
+  pixelText("下一抽必出限定机关（同时触发时优先出限定）；获得限定机关时等概率抽取", x0 + 30, y0 + 384, 12, "#9fd8ff", "left", false);
+  pixelText("点击任意处关闭", W / 2, y0 + ph - 24, 12, "#8f83c0", "center", false);
 }
 function drawGachaResult() {    // 抽卡结果展示（点击任意处关闭）
   ctx.globalAlpha = 0.78; px(0, 0, W, H, "#0d0a1f"); ctx.globalAlpha = 1;
@@ -1846,6 +1924,7 @@ function render() {
   else if (state === ST.WIN) drawEnd(true);
   else if (state === ST.LOSE) drawEnd(false);
   if (packOpen) drawPack();                  // 新手礼包面板（赠送弹窗之下、其他界面之上）
+  if (poolOpen) drawPool();                  // 卡池详情面板
   if (giftPop) drawGiftPop();              // 赠送弹窗覆盖在最上层
 }
 /* ---- 任务页：每日任务（领取制） + 新手任务 ---- */
