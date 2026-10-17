@@ -327,6 +327,26 @@ const BOMB_BODY = [
   "................"
 ];
 function whitePal(pal) { const o = {}; for (const k in pal) o[k] = "#ffffff"; return o; }
+/* 荆棘：深色土壤上的荆棘丛（藤蔓 v + 尖刺高光 h + 紫棘尖 p），卡池限定机关 */
+const PAL_THORNS = { "#": "#23331c", "v": "#3f7a33", "h": "#7cc24f", "p": "#c060ff" };
+const THORN_BODY = [
+  "................",
+  "..p.....p....p..",
+  "..v.....v....v..",
+  "..v..p..v.hv....",
+  ".hv..v..v.vv..p.",
+  ".vv..v.hvv.v.hv.",
+  ".vvhv.vv.hvvv...",
+  ".vvv.vvhv.vv....",
+  ".vvvhvvvhvvhvp..",
+  ".vvvvvvvvvvvvhv.",
+  ".vvhvvvhvvvhvvv.",
+  "hvvvvvvvvvvvhvvh",
+  "vvvvvvvvvvvvvvvv",
+  "vhvvvhvvvhvvvhvv",
+  "################",
+  "################"
+];
 const SPR = {
   slime:   { body: SLIME_BODY,   pal: PAL_SLIME,   scale: 2.2 },
   snowman: { body: SNOWMAN_BODY, pal: PAL_SNOWMAN, scale: 2.2 },
@@ -336,7 +356,8 @@ const SPR = {
   syringe: { body: SYRINGE_BODY, pal: PAL_SYRINGE, scale: 2.0 },
   crystal: { body: CRYSTAL_BODY, pal: PAL_CRYSTAL, scale: 2.0 },
   boots:   { body: BOOT_BODY,    pal: PAL_BOOTS,   scale: 2.0 },
-  bomb:    { body: BOMB_BODY,    pal: PAL_BOMB,    scale: 2.0 }
+  bomb:    { body: BOMB_BODY,    pal: PAL_BOMB,    scale: 2.0 },
+  thorns:  { body: THORN_BODY,   pal: PAL_THORNS,  scale: 2.0 }
 };
 for (const k in SPR) SPR[k].wpal = whitePal(SPR[k].pal);
 /* 在 size×size 的格子里画实体图标（备战携带栏 / 图鉴 / 底部机关槽） */
@@ -446,17 +467,17 @@ const TRAPS = [
   },
   {
     id: "barrier", name: "屏障", cost: 120,
-    hp: 3500, def: 150, atk: 100, interval: 2,
+    hp: 3500, def: 160, atk: 100, interval: 2,
     block: 2, range: 0,
     color: "#6fc8ff",
     desc: "高血高防的能量壁障，可同时阻挡 2 个地面敌人；仅攻击被自己阻挡的敌人。"
   },
   {
     id: "syringe", name: "注射剂", cost: 150,
-    hp: 800, def: 100, atk: 150, interval: 3,
+    hp: 800, def: 100, atk: 180, interval: 3,
     block: 1, range: 3, heal: true,               // heal: 不攻击敌人，range 为治疗半径（格）
     color: "#7cff6b",
-    desc: "不攻击敌人：每隔 3 秒为周围 3 格内生命最低的机关恢复生命，治疗量 = 攻击力（150）。可阻挡 1 个地面敌人。"
+    desc: "不攻击敌人：每隔 3 秒为周围 3 格内生命最低的机关恢复生命，治疗量 = 攻击力（180）。可阻挡 1 个地面敌人。"
   },
   {
     id: "crystal", name: "水晶球", cost: 100,     // 卡池限定机关：仅抽卡解锁
@@ -467,17 +488,24 @@ const TRAPS = [
   },
   {
     id: "boots", name: "靴子", cost: 50,          // 卡池限定机关：仅抽卡解锁
-    hp: 1600, def: 100, atk: 200, interval: 3,
+    hp: 1600, def: 115, atk: 200, interval: 2.5,
     block: 1, range: 0, limited: true,            // 近战：仅攻击被自己阻挡的敌人
     color: "#d8a86a",
     desc: "技能：每场战斗首次被建造后 5 秒内，每秒获得 100 奶龙币（仅第一只靴子触发）。近战：仅攻击被自己阻挡的敌人，可阻挡 1 个地面敌人。"
   },
   {
     id: "bomb", name: "炸弹", cost: 300,          // 普通机关：需抽卡解锁（不在 LAB_INIT_OWNED）
-    hp: 0, def: 0, atk: 800, interval: Infinity,  // 一次性爆破：不驻场，攻击间隔无意义
+    hp: 0, def: 0, atk: 900, interval: Infinity,  // 一次性爆破：不驻场，攻击间隔无意义
     block: 0, range: 0,
     color: "#ff8c3a",
     desc: "技能：被建造后立即对周围 2 格内的所有敌人（含飞行）造成伤害并立即损毁。"
+  },
+  {
+    id: "thorns", name: "荆棘", cost: 100,        // 卡池限定机关：仅抽卡解锁
+    hp: 800, def: 150, atk: 100, interval: 3,     // atk/interval 为额定面板值，技能为固定数值的光环
+    block: 0, range: 0, limited: true, thorns: true,   // thorns: 荆棘光环（所在格敌人减速 + 真实伤害）
+    color: "#5da24a",
+    desc: "技能：使自身所在格的敌人移动速度 -80%，并每秒受到 100 点真实伤害（真实伤害：不受防御减免，也不被伤害提升增幅）。不阻挡敌人。"
   }
 ];
 /*   敌人 ENEMIES：{
@@ -797,6 +825,7 @@ let loadout = [];                     // 携带的机关（至多 6 个，元素
 let traps = [];                       // 场上机关
 let enemies = [];                     // 场上敌人
 let fx = [];                          // 特效（射线/爆裂）
+let shakeT = 0;                       // 爆炸屏幕震动（炸弹触发，0.4s 内随机抖动衰减）
 let coins = COIN_START, life = LIFE_START;
 let lv = 1, exp = 0, kills = 0, gameT = 0;
 let chosen = [];                      // 已选战略 id
@@ -901,7 +930,8 @@ function buildAt(c, r) {
       if (Math.hypot(e.x - bx, e.y - by) <= BOMB_RANGE * CELL)
         hurtEnemy(e, trapDmgOf(bt, e.def));
     }
-    fx.push({ type: "boom", x: bx, y: by, r: BOMB_RANGE * CELL, ttl: 0.4 });
+    fx.push({ type: "boom", x: bx, y: by, r: BOMB_RANGE * CELL, ttl: 0.55 });
+    shakeT = 0.4;                                      // 屏幕震动：强化爆破冲击感
     return true;
   }
   const hpMax = trapHpMaxOf(base);
@@ -934,6 +964,7 @@ const resOf = (base, k) => Math.min(1, (base.res && base.res[k]) || 0);
 const PARA_TIME = 0.8;                       // 麻痹时长（秒）：无法移动（被阻挡时的攻击不受影响）
 const FREEZE_TIME = 1;                       // 冻结时长（秒）：机关无法行动（攻击/治疗/冷却暂停，阻挡仍有效）
 const BOOT_BONUS_TIME = 5, BOOT_COIN_RATE = 100;   // 靴子技能：首建后 5 秒内每秒 +100 奶龙币（共 500）
+const THORN_SLOW = 0.8, THORN_DPS = 100;           // 荆棘光环：所在格敌人移速 -80% + 每秒 100 真实伤害
 const BOMB_RANGE = 2;                        // 炸弹爆破半径（格）：建造后立即对范围内所有敌人造成伤害并损毁
 function waveMul(no) { return Math.pow(WAVE_CFG.scaleMul, Math.max(0, no - WAVE_CFG.lateWave)); }
 const fmtMul = m => { const s = m.toFixed(2); return s.endsWith("0") ? s.slice(0, -1) : s; };   // ×1.1 / ×1.21
@@ -972,8 +1003,8 @@ function spawnEnemy(q) {
     jx: Math.random() * 12 - 6, jy: Math.random() * 8 - 4
   });
 }
-function hurtEnemy(e, dmg) {
-  e.hp -= dmg; e.flash = 0.1;
+function hurtEnemy(e, dmg, quiet) {
+  e.hp -= dmg; if (!quiet) e.flash = 0.1;
   if (e.hp <= 0 && !e.dead) {
     e.dead = true; kills++; lab.rookie.kills++;        // rookie.kills：新手任务（累计消灭），随结算落盘
     sfxEnemyDie();
@@ -985,6 +1016,7 @@ function update(dt) {
   gameT += dt;
   coins = Math.min(COIN_MAX, coins + (COIN_RATE + mods.coinRate) * dt);
   if (hintT > 0) hintT -= dt;
+  if (shakeT > 0) shakeT -= dt;
   if (waveBannerT > 0) waveBannerT -= dt;
 
   /* ---- 波次调度：到点开新波（不超过总波次数）；波内敌人按 spawnGap 依次从出生点出场 ---- */
@@ -993,10 +1025,16 @@ function update(dt) {
     if (gameT >= spawnQ[i].t) { spawnEnemy(spawnQ[i]); spawnQ.splice(i, 1); }
   }
 
+  /* ---- 荆棘光环格集合（存活荆棘所在格；真实伤害与减速均不吃任何加成/减免） ---- */
+  const thornCells = new Set();
+  for (const t of traps) if (!t.dead && t.base.thorns) thornCells.add(t.c + "," + t.r);
+
   /* ---- 敌人：移动 / 攻击机关 ---- */
   for (const e of enemies) {
     if (e.dead) continue;
     if (e.flash > 0) e.flash -= dt;
+    const onThorn = thornCells.has(Math.floor((e.x - GRID_OX) / CELL) + "," + Math.floor((e.y - GRID_OY) / CELL));
+    if (onThorn) { hurtEnemy(e, THORN_DPS * dt, true); if (e.dead) continue; }   // 荆棘：每秒 100 真实伤害（quiet 不刷屏白闪）
     if (e.blockedBy) {
       if (e.blockedBy.dead) { e.blockedBy = null; }
       else {
@@ -1019,7 +1057,7 @@ function update(dt) {
     }
     if (e.paraT > 0) { e.paraT -= dt; }        // 麻痹：无法移动（被阻挡时的攻击不受影响）
     else if (!e.blockedBy) {
-      const spd = e.base.speed * CELL * mods.enemySpeed;
+      const spd = e.base.speed * CELL * mods.enemySpeed * (onThorn ? 1 - THORN_SLOW : 1);   // 荆棘：所在格移速 -80%
       let rest = spd * dt;
       while (rest > 0 && !e.dead) {
         const tp = e.route[e.routeIdx];
@@ -1573,14 +1611,21 @@ function drawFx() {
       ctx.strokeStyle = f.color || "#c9a0ff"; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (0.3 + 0.7 * k), 0, Math.PI * 2); ctx.stroke();
       ctx.globalAlpha = 1;
-    } else if (f.type === "boom") {                  // 炸弹爆破：橙红双层冲击环 + 中心闪光
-      const k = 1 - f.ttl / 0.4;
-      ctx.globalAlpha = Math.max(0, f.ttl / 0.4) * 0.8;
-      ctx.strokeStyle = "#ff8c3a"; ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (0.25 + 0.75 * k), 0, Math.PI * 2); ctx.stroke();
-      ctx.strokeStyle = "#ffd23f"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (0.25 + 0.75 * k) * 0.65, 0, Math.PI * 2); ctx.stroke();
-      px(f.x - 6, f.y - 6, 12, 12, "#ffe873");
+    } else if (f.type === "boom") {                  // 炸弹爆破：中心火球爆闪 + 三层冲击环 + 飞散火星
+      const k = 1 - f.ttl / 0.55, a = Math.max(0, f.ttl / 0.55);
+      const fr = f.r * (0.3 + 0.55 * k);             // 中心火球（径向渐变，膨胀后消散）
+      const g = ctx.createRadialGradient(f.x, f.y, fr * 0.12, f.x, f.y, fr);
+      g.addColorStop(0, "#fff6c0"); g.addColorStop(0.4, "#ffd23f"); g.addColorStop(0.75, "#ff8c3a"); g.addColorStop(1, "rgba(255,90,40,0)");
+      ctx.globalAlpha = a * 0.95;
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(f.x, f.y, fr, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = a;
+      ctx.strokeStyle = "#ff5a28"; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (0.3 + 0.7 * k), 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = "#ff8c3a"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (0.25 + 0.75 * k) * 0.75, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = "#ffd23f"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (0.2 + 0.8 * k) * 0.5, 0, Math.PI * 2); ctx.stroke();
+      for (let i = 0; i < 12; i++) {                 // 12 向飞散火星（随时间缩小淡出）
+        const an = i / 12 * Math.PI * 2 + 0.3, d = f.r * (0.35 + 0.9 * k), sz = Math.max(1, Math.round(5 * a));
+        px(f.x + Math.cos(an) * d - sz / 2, f.y + Math.sin(an) * d - sz / 2, sz, sz, "#ffe873");
+      }
       ctx.globalAlpha = 1;
     } else if (f.type === "burst") {
       const k = 1 - f.ttl / 0.5, n = 6;
@@ -1915,6 +1960,9 @@ function drawLab() {
 }
 
 function render() {
+  const sa = shakeT > 0 ? shakeT / 0.4 : 0;                          // 震动强度随剩余时间衰减
+  ctx.save();
+  if (sa > 0) ctx.translate(Math.round((Math.random() * 2 - 1) * 7 * sa), Math.round((Math.random() * 2 - 1) * 7 * sa));
   if (state === ST.MENU) drawMenu();
   else if (state === ST.LOADOUT) drawLoadout();
   else if (state === ST.PLAY) drawPlay();
@@ -1923,6 +1971,7 @@ function render() {
   else if (state === ST.TASK) drawTask();
   else if (state === ST.WIN) drawEnd(true);
   else if (state === ST.LOSE) drawEnd(false);
+  ctx.restore();                                           // 结束屏幕震动偏移（UI 弹窗不参与震动）
   if (packOpen) drawPack();                  // 新手礼包面板（赠送弹窗之下、其他界面之上）
   if (poolOpen) drawPool();                  // 卡池详情面板
   if (giftPop) drawGiftPop();              // 赠送弹窗覆盖在最上层
@@ -1982,7 +2031,7 @@ function drawPack() {
     pixelText(t.name, r.x + r.w / 2, r.y + 84, 20, "#ffd23f", "center", true);
     pixelText("卡池限定", r.x + r.w / 2, r.y + 106, 11, "#c9a0ff", "center", false);
     pixelText(`攻${t.atk} 血${t.hp} 费${t.cost}`, r.x + r.w / 2, r.y + 130, 13, "#cfe8ff", "center", false);
-    pixelText(`阻挡${t.block} ${t.range > 0 ? (t.aoe ? "范围" + t.range : "射程" + t.range) : "近战"}`,
+    pixelText(`阻挡${t.block} ${t.thorns ? "光环" : t.range > 0 ? (t.aoe ? "范围" + t.range : "射程" + t.range) : "近战"}`,
       r.x + r.w / 2, r.y + 150, 12, "#9fd8ff", "center", false);
     pixelText(owned ? `已拥有 · 重复转材料×${DUP_TO_MAT}` : (sel ? "已选中 ✓" : "点击选择"),
       r.x + r.w / 2, r.y + 176, 11, owned ? "#ff9aa9" : sel ? "#7cff6b" : "#6f5fa8", "center", false);
