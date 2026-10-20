@@ -9,7 +9,7 @@
   html, body { width: 100%; min-height: 100%; }
   body {
     font-family: "Courier New", monospace;
-    background: radial-gradient(circle at 50% 12%, #34255f 0%, #1b1436 62%, #120c28 100%);
+    background: #171130;
     color: #fff;
     display: flex;
     flex-direction: column;
@@ -18,16 +18,28 @@
     padding: 34px 16px 46px;
     overflow-x: hidden;
   }
+  /* 动态像素背景（星空 / 月亮 / 云 / 霓虹网格城市 / 漂浮奶龙） */
+  #bg { position: fixed; inset: 0; width: 100%; height: 100%; z-index: -1; image-rendering: pixelated; }
+  /* 复古 CRT 扫描线 + 暗角（时尚感滤镜层） */
+  .scanlines {
+    position: fixed; inset: 0; z-index: 30; pointer-events: none; opacity: .22;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.4) 0 1px, transparent 1px 4px);
+  }
+  .vig {
+    position: fixed; inset: 0; z-index: 29; pointer-events: none;
+    background: radial-gradient(ellipse at 50% 38%, transparent 52%, rgba(8,5,20,.5) 100%);
+  }
   .title {
     font-size: clamp(34px, 7vw, 58px);
     font-weight: bold;
-    color: #ffd23f;
-    text-shadow: 3px 3px 0 rgba(0,0,0,.45);
     letter-spacing: 4px;
+    background: linear-gradient(180deg, #fff6d8 8%, #ffd23f 45%, #f2a01e 62%, #ffe873 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(3px 3px 0 rgba(0,0,0,.5)) drop-shadow(0 0 16px rgba(255,210,63,.35));
     animation: float 2.6s ease-in-out infinite;
   }
   @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
-  .subtitle { margin-top: 10px; color: #cfe8ff; font-size: clamp(13px, 2.6vw, 17px); opacity: .9; }
+  .subtitle { margin-top: 10px; color: #cfe8ff; font-size: clamp(13px, 2.6vw, 17px); opacity: .9; text-shadow: 0 2px 0 rgba(0,0,0,.5); }
   .grid {
     margin-top: 34px;
     display: flex;
@@ -41,8 +53,11 @@
     display: block;
     text-decoration: none;
     color: #fff;
+    position: relative;
+    overflow: hidden;
     width: 300px;
-    background: linear-gradient(180deg, #2e2358 0%, #241b47 100%);
+    background: linear-gradient(180deg, rgba(48,37,94,.88) 0%, rgba(34,26,68,.92) 100%);
+    backdrop-filter: blur(5px);
     border: 3px solid #4a3a86;
     border-radius: 14px;
     padding: 20px 18px 18px;
@@ -50,6 +65,14 @@
     transition: transform .15s, border-color .15s, box-shadow .15s;
     box-shadow: 0 10px 26px rgba(0,0,0,.4);
   }
+  /* 悬停扫光（时尚感） */
+  a.card::after {
+    content: ""; position: absolute; top: 0; left: -80%;
+    width: 60%; height: 100%; transform: skewX(-18deg);
+    background: linear-gradient(105deg, transparent, rgba(255,255,255,.16), transparent);
+    transition: left .45s;
+  }
+  a.card:hover::after { left: 120%; }
   a.card:hover {
     transform: translateY(-6px);
     border-color: #ffd23f;
@@ -65,8 +88,9 @@
     image-rendering: pixelated;
     display: flex; align-items: center; justify-content: center;
     overflow: hidden;
+    box-shadow: 0 6px 16px rgba(0,0,0,.45), inset 0 0 0 2px rgba(255,255,255,.25);
   }
-  .card h2 { margin-top: 14px; font-size: 22px; color: #ffd23f; letter-spacing: 2px; }
+  .card h2 { margin-top: 14px; font-size: 22px; color: #ffd23f; letter-spacing: 2px; text-shadow: 2px 2px 0 rgba(0,0,0,.5); }
   .card p { margin-top: 8px; font-size: 13px; color: #cfc6f2; line-height: 1.7; }
   .card .tag {
     display: inline-block;
@@ -89,9 +113,14 @@
   .soon .q { font-size: 46px; color: #6f5fa8; }
   .soon p { margin-top: 6px; }
   footer { margin-top: 38px; color: #6f5fa8; font-size: 12px; letter-spacing: 1px; }
+  footer .coin { color: #ffd23f; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
 </style>
 </head>
 <body>
+  <canvas id="bg"></canvas>
+  <div class="vig"></div>
+  <div class="scanlines"></div>
   <div class="title">奶龙游戏集</div>
   <div class="subtitle">选一个小游戏开始冒险吧！</div>
 
@@ -121,7 +150,7 @@
     </div>
   </div>
 
-  <footer>奶龙游戏集 · 每个小游戏独立开发，持续更新中</footer>
+  <footer>奶龙游戏集 · 每个小游戏独立开发，持续更新中 <span class="coin">▮</span></footer>
 
 <script>
 "use strict";
@@ -195,6 +224,90 @@ const SHIELD = [
 drawMap(document.getElementById("pv1"), NAILONG, NAILONG_PAL, 1.4);
 drawMap(document.getElementById("pv2"), CAKE, CAKE_PAL, 2.1);
 drawMap(document.getElementById("pv3"), SHIELD, SHIELD_PAL, 2.1);
+
+/* ================= 动态像素背景：星空 + 大月亮 + 像素云 + 霓虹网格城市 + 漂浮奶龙 ================= */
+const bg = document.getElementById("bg"), bgc = bg.getContext("2d");
+let BW = 0, BH = 0, stars = [], clouds = [], city = [], glowDots = [];
+function bgBuild() {
+  BW = bg.width = innerWidth; BH = bg.height = innerHeight;
+  bgc.imageSmoothingEnabled = false;
+  const R = (a, b) => a + Math.random() * (b - a);
+  stars = []; for (let i = 0; i < 120; i++) stars.push({ x: R(0, BW), y: R(0, BH * 0.6), s: Math.random() < 0.85 ? 2 : 3, ph: R(0, 6.28), sp: R(0.5, 1.6) });
+  glowDots = []; for (let i = 0; i < 14; i++) glowDots.push({ x: R(0, BW), y: R(BH * 0.1, BH * 0.55), c: ["#ff4fd8", "#4ff0ff"][(Math.random() * 2) | 0], ph: R(0, 6.28) });
+  clouds = []; for (let i = 0; i < 6; i++) clouds.push({ x: R(-160, BW), y: R(BH * 0.06, BH * 0.4), w: R(64, 130), sp: R(5, 12) });
+  city = []; let x = -30;                                              // 城市剪影：随机楼宇 + 预生成窗灯
+  while (x < BW + 60) {
+    const w = (34 + Math.random() * 56) | 0, h = (36 + Math.random() * 110) | 0, wins = [];
+    for (let wy = 8; wy < h - 6; wy += 13) for (let wx = 5; wx < w - 7; wx += 10) if (Math.random() < 0.42) wins.push([wx, wy, Math.random()]);
+    city.push({ x, w, h, wins }); x += w + ((3 + Math.random() * 10) | 0);
+  }
+}
+bgBuild(); addEventListener("resize", bgBuild);
+function bpx(x, y, w, h, c) { bgc.fillStyle = c; bgc.fillRect(x | 0, y | 0, w, h); }
+function drawNailongAt(x, y, s) {                                     // 像素奶龙漂浮
+  for (let r = 0; r < NAILONG.length; r++) for (let c = 0; c < NAILONG[0].length; c++) {
+    const col = NAILONG_PAL[NAILONG[r][c]];
+    if (col) { bgc.fillStyle = col; bgc.fillRect((x + c * s) | 0, (y + r * s) | 0, Math.ceil(s), Math.ceil(s)); }
+  }
+}
+let bgLast = 0, gridT = 0;
+function bgFrame(ts) {
+  const dt = Math.min(0.05, (ts - bgLast) / 1000 || 0); bgLast = ts; gridT += dt;
+  const t = ts / 1000, hz = BH * 0.74;                                // 地平线
+  // 夜空渐变（上深紫 → 地平线紫光 → 地面深色）
+  const g = bgc.createLinearGradient(0, 0, 0, BH);
+  g.addColorStop(0, "#171130"); g.addColorStop(0.45, "#2b1e5e"); g.addColorStop(0.72, "#4a2a7a");
+  g.addColorStop(0.75, "#1b1436"); g.addColorStop(1, "#0d0a1f");
+  bgc.fillStyle = g; bgc.fillRect(0, 0, BW, BH);
+  // 闪烁星星 + 霓虹漂浮点
+  for (const st of stars) { bgc.globalAlpha = 0.25 + 0.75 * Math.abs(Math.sin(t * st.sp + st.ph)); bpx(st.x, st.y, st.s, st.s, "#fff6e8"); }
+  for (const d of glowDots) { bgc.globalAlpha = 0.3 + 0.5 * Math.abs(Math.sin(t * 1.2 + d.ph)); bpx(d.x, d.y, 3, 3, d.c); }
+  bgc.globalAlpha = 1;
+  // 像素大月亮（光晕 + 阶梯圆 + 陨石坑）
+  const mx2 = BW * 0.84, my2 = BH * 0.15, mr = 30;
+  bgc.globalAlpha = 0.14; bgc.fillStyle = "#fff0c6"; bgc.beginPath(); bgc.arc(mx2, my2, mr + 18, 0, 6.3); bgc.fill(); bgc.globalAlpha = 1;
+  for (let dy = -mr; dy <= mr; dy += 3) {
+    const w2 = Math.floor(Math.sqrt(mr * mr - dy * dy));
+    bpx(mx2 - w2, my2 + dy, w2 * 2, 3, "#fff0c6");
+  }
+  bpx(mx2 - 12, my2 - 8, 6, 6, "#ecd9a0"); bpx(mx2 + 4, my2 + 6, 8, 5, "#ecd9a0"); bpx(mx2 - 4, my2 + 14, 5, 4, "#ecd9a0");
+  // 像素云（缓慢漂移）
+  for (const cl of clouds) {
+    cl.x += cl.sp * dt; if (cl.x > BW + 160) cl.x = -160;
+    bgc.globalAlpha = 0.24;
+    bpx(cl.x, cl.y, cl.w, 10, "#cfc0ff"); bpx(cl.x + cl.w * 0.18, cl.y - 8, cl.w * 0.5, 8, "#cfc0ff"); bpx(cl.x + cl.w * 0.1, cl.y + 10, cl.w * 0.7, 6, "#b8a5f0");
+  }
+  bgc.globalAlpha = 1;
+  // 漂浮奶龙
+  drawNailongAt((t * 14) % (BW + 150) - 130, BH * 0.34 + Math.sin(t * 1.1) * 10, 3);
+  // 城市剪影 + 窗灯（少量闪烁）
+  for (const b of city) {
+    bpx(b.x, hz - b.h, b.w, b.h, "#221a44"); bpx(b.x, hz - b.h, b.w, 3, "#2e2358");
+    for (const wn of b.wins) {
+      if (wn[2] > 0.12 && (wn[2] > 0.9 ? Math.sin(t * 3 + wn[0]) > -0.4 : true))
+        bpx(b.x + wn[0], hz - b.h + wn[1], 4, 6, wn[2] > 0.8 ? "#ffd23f" : "#e8b84a");
+    }
+  }
+  // 地平线霓虹光带
+  bgc.globalAlpha = 0.5; bpx(0, hz - 2, BW, 4, "#ff4fd8");
+  bgc.globalAlpha = 0.18; bpx(0, hz - 8, BW, 14, "#ff4fd8");
+  bgc.globalAlpha = 1;
+  // 赛博透视网格（横向线向前滚动）
+  bgc.globalAlpha = 0.4; bgc.lineWidth = 1;
+  bgc.strokeStyle = "#ff4fd8";
+  for (let i = -12; i <= 12; i++) {
+    bgc.beginPath(); bgc.moveTo(BW / 2 + i * BW * 0.09, hz); bgc.lineTo(BW / 2 + i * BW * 0.42, BH); bgc.stroke();
+  }
+  bgc.strokeStyle = "#4ff0ff";
+  const gs = (gridT * 0.7) % 1;
+  for (let i = 0; i < 12; i++) {
+    const p = (i + gs) / 12, y = hz + (BH - hz) * p * p;
+    bgc.beginPath(); bgc.moveTo(0, y); bgc.lineTo(BW, y); bgc.stroke();
+  }
+  bgc.globalAlpha = 1;
+  requestAnimationFrame(bgFrame);
+}
+requestAnimationFrame(bgFrame);
 </script>
 </body>
 </html>
