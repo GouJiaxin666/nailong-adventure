@@ -407,6 +407,65 @@ const BOW_BODY = [
   "......###.......",
   "................"
 ];
+// 翼龙（首领·飞行）：紫翼膜 + 长喙 + 头冠，横扫式双翼造型
+const PAL_PTERO = { "#": "#2a1840", "w": "#7a4fd0", "b": "#4a2a72", "h": "#b28ae0", "k": "#ffb03f", "e": "#ffe873" };
+const PTERO_BODY = [
+  "................",
+  "................",
+  ".....####.......",
+  "....#hhhb#......",
+  "...##beee#......",
+  "..#wwb####kkkk#.",
+  "#wwwwwbbbb##kkk#",
+  "#wwwwwbbb##hhh#.",
+  ".#wwwwbbbb#.....",
+  "..#wwwbbb##.....",
+  "...##bbbb#......",
+  "....##bb#.......",
+  "......##........",
+  "................",
+  "................",
+  "................"
+];
+const PAL_WATCH = { "#": "#10322b", "s": "#8ff0d0", "d": "#37a98c", "e": "#ffd23f" };
+const WATCH_BODY = [
+  "................",
+  ".......##.......",
+  "......#ee#......",
+  ".....#eeee#.....",
+  "....#dddddd#....",
+  "...#dsssssdd#...",
+  "...#ds#ss#sd#...",
+  "...#ds#ee#sd#...",
+  "...#ds#ee#sd#...",
+  "...#dsssssdd#...",
+  "...#ds#ss#sd#...",
+  "...#dsssssdd#...",
+  "....#dddddd#....",
+  ".....#dddd#.....",
+  "......####......",
+  "................"
+];
+// 灯泡：暖黄玻璃泡 + 灯丝 + 螺纹灯座
+const PAL_BULB = { "#": "#3a2f10", "g": "#ffe873", "h": "#fff6c8", "f": "#ffb03f", "b": "#8a94a0" };
+const BULB_BODY = [
+  "................",
+  ".....####.......",
+  "....#gggg#......",
+  "...#ghgggg#.....",
+  "...#g#ff#g#.....",
+  "...#g#ff#g#.....",
+  "...#g####g#.....",
+  "....#gggg#......",
+  "....#gggg#......",
+  ".....####.......",
+  ".....#bb#.......",
+  "....#bbbb#......",
+  ".....#bb#.......",
+  ".....#bb#.......",
+  "......##........",
+  "................"
+];
 const SPR = {
   slime:   { body: SLIME_BODY,   pal: PAL_SLIME,   scale: 2.2 },
   snowman: { body: SNOWMAN_BODY, pal: PAL_SNOWMAN, scale: 2.2 },
@@ -420,7 +479,10 @@ const SPR = {
   bomb:    { body: BOMB_BODY,    pal: PAL_BOMB,    scale: 2.0 },
   thorns:  { body: THORN_BODY,   pal: PAL_THORNS,  scale: 2.0 },
   bow:     { body: BOW_BODY,     pal: PAL_BOW,     scale: 2.0 },
-  bird:    { body: BIRD_BODY,    pal: PAL_BIRD,    scale: 2.0 }
+  watch:   { body: WATCH_BODY,   pal: PAL_WATCH,   scale: 2.0 },
+  bulb:    { body: BULB_BODY,    pal: PAL_BULB,    scale: 2.0 },
+  bird:    { body: BIRD_BODY,    pal: PAL_BIRD,    scale: 2.0 },
+  ptero:   { body: PTERO_BODY,   pal: PAL_PTERO,   scale: 2.6 }
 };
 for (const k in SPR) SPR[k].wpal = whitePal(SPR[k].pal);
 /* 在 size×size 的格子里画实体图标（备战携带栏 / 图鉴 / 底部机关槽） */
@@ -567,7 +629,7 @@ const TRAPS = [
   },
   {
     id: "boots", name: "靴子", cost: 50,          // 卡池限定机关：仅抽卡解锁
-    hp: 1600, def: 115, atk: 200, interval: 2.5,
+    hp: 1600, def: 120, atk: 200, interval: 2.5,
     block: 1, range: 0, limited: true,            // 近战：仅攻击被自己阻挡的敌人
     color: "#d8a86a",
     desc: "技能：每场战斗首次被建造后 5 秒内，每秒获得 100 奶龙币。近战：仅攻击被自己阻挡的敌人，可阻挡 1 个地面敌人。"
@@ -584,7 +646,7 @@ const TRAPS = [
     hp: 1000, def: 180, atk: 100, interval: 3,     // atk/interval 为额定面板值，技能为固定数值的光环
     block: 0, range: 0, limited: true, thorns: true,   // thorns: 荆棘光环（所在格敌人减速 + 真实伤害）
     color: "#5da24a",
-    desc: "技能：使自身所在格的敌人移动速度 -80%，并每秒受到 150 点真实伤害。不阻挡敌人。"
+    desc: "技能：使自身所在格的敌人移动速度 -85%，并每秒受到 150 点真实伤害。不阻挡敌人。"
   },
   {
     id: "bow", name: "弓箭", cost: 100,           // 普通机关：初始拥有，也可在卡池普通池抽到
@@ -592,15 +654,31 @@ const TRAPS = [
     block: 1, range: 3,                           // 远程：可命中 3 格内单个敌人（含飞行），可阻挡 1 个地面敌人
     color: "#c8a060",
     desc: "远程攻击：可命中 3 格内的一名敌人（含飞行），也能阻挡 1 个地面敌人。技能：范围内没有敌人时，每经过一个攻击间隔，下一次攻击的攻击力 +50%（至多叠加 2 层，开火后清零）。"
+  },
+  {
+    id: "watch", name: "守望屏障", cost: 120,     // 卡池限定机关：仅抽卡解锁
+    hp: 4000, def: 220, atk: 100, interval: 2,
+    block: 3, range: 0, limited: true,            // 近战：仅攻击被自己阻挡的敌人
+    blockAir: true, regenBlock: 0.03,             // blockAir: 可阻挡飞行敌人；regenBlock: 每阻挡 1 名敌人每秒恢复 3% 生命上限
+    color: "#8ff0d0",
+    desc: "高血高防的守望壁垒，可同时阻挡 3 个敌人（含飞行敌人）；仅攻击被自己阻挡的敌人。技能：每阻挡 1 名敌人，每秒恢复 3% 生命值上限的生命值。"
+  },
+  {
+    id: "bulb", name: "灯泡", cost: 80,            // 普通机关：需抽卡解锁（不在 LAB_INIT_OWNED）
+    hp: 1000, def: 100, atk: 500, interval: Infinity,   // 不攻击：攻击间隔无意义，atk 仅为光环强度的来源
+    block: 0, range: 0, buff: 0.5,               // buff: 使上下左右相邻机关的攻击力提高（提高值 = 灯泡攻击力的 50%）
+    color: "#ffe873",
+    desc: "技能：不攻击。使上下左右相邻机关的攻击力提高，提高值等同于灯泡攻击力的 50%。"
   }
 ];
 /*   敌人 ENEMIES：{
-     id, name, tier, flying,             // tier:"normal"普通/"elite"精英；flying:是否飞行
+     id, name, tier, flying,             // tier:"normal"普通/"elite"精英/"boss"首领；flying:是否飞行
      hp, def, atk, interval,             // 生命 / 防御 / 攻击 / 攻击间隔(秒)
      speed,                              // 移动速度（格/秒）
      exp,                                // 击败后获得的守卫经验
-     res?,                               // 抗性：{ frz?, para? }（0~1），按百分比减少受到的对应负面状态持续时间，默认 0
+     res?,                               // 抗性：{ frz?, para?, stun? }（0~1），按百分比减少受到的对应负面状态持续时间，默认 0
      freeze?, sweep?, atkRange?,          // freeze:攻击使机关冻结1秒；sweep:阻挡时前方半圆范围攻击；atkRange:远程攻击半径（飞行专属）
+     maxTargets?, burn?,                  // maxTargets:远程攻击同时命中的机关数上限（默认1）；burn:攻击附带灼烧（每秒真实伤害）
      desc, color                         // 说明 / 主题色
    }
    飞行敌人：不会被机关阻挡，且只有远程攻击（机关 range>0）能索敌并命中。          */
@@ -615,13 +693,13 @@ const ENEMIES = [
     id: "snowman", name: "雪人", tier: "elite", flying: false,
     hp: 3300, def: 150, atk: 300, interval: 2, speed: 1.5,
     exp: 40, freeze: true, res: { frz: 1, para: 0.25, stun: 0.25 }, color: "#9fd8ff",
-    desc: "精英：仅在被机关阻挡时攻击，攻击使机关冻结 1 秒（冻结：无法行动）。拥有 100% 冻结抗性、25% 麻痹抗性与 25% 晕眩抗性。"
+    desc: "仅在被机关阻挡时攻击，攻击使机关冻结 1 秒（冻结：无法行动）。拥有 100% 冻结抗性、25% 麻痹抗性与 25% 晕眩抗性。"
   },
   {
     id: "samurai", name: "武士", tier: "elite", flying: false,
     hp: 3800, def: 100, atk: 400, interval: 2, speed: 1.8,
     exp: 40, sweep: true, res: { frz: 0.35, para: 0.35, stun: 0.35 }, color: "#b84040",   // sweep: 阻挡时对前方半径 1.3 格半圆内的机关造成伤害；res: 35% 冻结/麻痹/晕眩抗性
-    desc: "精英：仅在被机关阻挡时攻击，挥刀对自身前方半径 1.3 格的半圆形范围内的机关造成伤害。拥有 35% 冻结抗性、35% 麻痹抗性与 35% 晕眩抗性。"
+    desc: "仅在被机关阻挡时攻击，挥刀对自身前方半径 1.3 格的半圆形范围内的机关造成伤害。拥有 35% 冻结抗性、35% 麻痹抗性与 35% 晕眩抗性。"
   },
   {
     id: "dog", name: "巡逻犬", tier: "normal", flying: false,
@@ -634,7 +712,14 @@ const ENEMIES = [
     hp: 800, def: 80, atk: 270, interval: 3, speed: 2,
     atkRange: 2.5,                                   // atkRange: 远程攻击半径（格），飞行敌人专属
     exp: 10, color: "#d08a4a",
-    desc: "飞行敌人：不会被机关阻挡，对周围 2.5 格内的一个机关发起攻击，攻击时短暂无法移动。只有远程与范围攻击能命中它。"
+    desc: "飞行敌人,对周围 2.5 格内的一个机关发起攻击，攻击时短暂无法移动。只有远程与范围攻击能命中它。"
+  },
+  {
+    id: "ptero", name: "翼龙", tier: "boss", flying: true,
+    hp: 20000, def: 300, atk: 450, interval: 2, speed: 0.5,
+    atkRange: 3, maxTargets: 4, burn: true,     // 远程：对周围 3 格内至多 4 个机关造成伤害并施加灼烧
+    exp: 200, color: "#a06fd8",
+    desc: "飞行敌人。攻击对周围 3 格内至多 4 个机关造成伤害，并施加持续 5 秒的灼烧（每秒 125 点真实伤害）；对处于灼烧状态的机关造成的伤害 +80%。"
   }
 ];
 /*   波次 WAVE_CFG：敌人分波次程序化出击，每波从出生点刷新「随机数量 × 随机种类」的敌人
@@ -649,7 +734,9 @@ const WAVE_CFG = {
   countBase: 2, countGrowEvery: 3, countRand: 2, countCap: 8,
   spawnGap: 0.7,
   lateWave: 5, eliteChance: 0.12, eliteChanceLate: 0.30,
-  scaleMul: 1.1, maxWave: Infinity          // scaleMul: 第5波后每波 生命/攻击/防御 ×1.1（复利）
+  scaleMul: 1.1, maxWave: Infinity,          // scaleMul: 第5波后每波 生命/攻击/防御 ×1.1（复利）
+  bossWaveFrom: 5,                            // 首领仅在第 5 波之后刷新（即第 6 波起）
+  bossChanceBase: 0.06, bossChanceStep: 0.01, bossChanceCap: 0.35   // 首领刷新概率：随波次递增并有上限
 };
 
 /* ================= 音频：WebAudio 实时合成（无外部资源，保持单文件） ================= */
@@ -744,10 +831,12 @@ const LAB_SAVE_KEY = "nailong_bw_save";
 const STONE_START  = 3200;                     // 首次启动赠送的奶石（旧存档不受影响）
 const DRAW_COST    = 160;                      // 每次抽卡消耗的奶石
 const TRAP_LV_MAX  = 5;                        // 机关研发等级上限
-const LAB_LV_STEP  = 0.2;                      // 每级提升幅度（基于基础值）
+const LAB_LV_STEP  = 0.25;                      // 每级提升幅度（基于基础值；Lv.5 = 2×）
 const LAB_UP_COST  = [0, 5, 10, 20, 50];       // Lv.1→2 .. Lv.4→5 的材料消耗（满级共 85）
 const DUP_TO_MAT   = 20;                       // 抽到重复的卡池限定机关转换的材料数
 const DUP_TO_MAT_TRAP = 5;                     // 抽到重复的普通机关转换的材料数
+const DUP_TO_TREASURE = 1;                     // 抽到重复的卡池限定机关额外获得的圣眷珍材数
+const TREASURE_COST = 5;                       // 兑换一个卡池限定机关所需的圣眷珍材数
 /* 研发系统上线时已有的机关默认拥有；后续新机关不进此列表 → 需抽卡解锁 */
 const LAB_INIT_OWNED = ["pistol", "barrier", "syringe", "bow"];   // 弓箭：初始拥有（普通机关）
 /* 卡池（权重随机，用户指定概率）：卡池限定机关 2% + 普通机关 8% + 材料×1 90%
@@ -769,11 +858,12 @@ const GACHA_GIFT = 3200;
 function storeGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function storeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 function loadLab() {
-  const d = { stone: STONE_START, mat: 0, owned: {}, lv: {}, pityAny: 0, pityLtd: 0,
+  const d = { stone: STONE_START, mat: 0, owned: {}, lv: {}, pityAny: 0, pityLtd: 0, treasure: 0,
               wkKey: "", wkStone: 0, dayKey: "", dayKills: 0, dayDone: false, gachaGift: false,
               pack: false,                                                           // 新手礼包：领取标记（领取后入口消失）
               nmBest: 0, nmClaim: 0,                                                 // 噩梦守卫：历史最佳总波次 / 已领里程碑档数
               inspire: 0, wkInKey: "", wkInspire: 0, tech: {},                       // 科技树：灵感余额 / 周计数key / 本周已获灵感 / 已点亮节点
+              ev: null,                                                                // 活动任务：首次进入任务页时初始化 14 天有效期（见下）
               rookie: { gacha: 0, waves: 0, kills: 0, ups: 0, bestLv: 0, nmDone: false, claim: {} } };   // 新手任务进度/领取标记（nmDone：是否完成过一次噩梦守卫）
   for (const t of TRAPS) { d.owned[t.id] = LAB_INIT_OWNED.includes(t.id); d.lv[t.id] = 1; }
   let s = null;
@@ -781,6 +871,7 @@ function loadLab() {
   if (s) {
     d.stone = Math.max(0, s.stone | 0); d.mat = Math.max(0, s.mat | 0);
     d.pityAny = Math.max(0, s.pityAny | 0); d.pityLtd = Math.max(0, s.pityLtd | 0);   // 保底计数（旧存档默认0）
+    d.treasure = Math.max(0, s.treasure | 0);                                          // 圣眷珍材（旧存档默认0）
     d.wkKey = s.wkKey || ""; d.wkStone = Math.max(0, s.wkStone | 0);                // 战斗奶石：周上限计数
     d.dayKey = s.dayKey || ""; d.dayKills = Math.max(0, s.dayKills | 0);            // 每日任务：日期/击杀/完成
     d.dayDone = !!s.dayDone; d.gachaGift = !!s.gachaGift;                           // 抽卡首进赠送标记
@@ -796,6 +887,16 @@ function loadLab() {
       d.rookie.bestLv = Math.max(0, r.bestLv | 0); d.rookie.claim = r.claim || {};
       d.rookie.nmDone = !!r.nmDone;                                                    // 新手任务：完成过一次噩梦守卫（旧存档默认未完成）
     }
+    if (s.ev) {                                                                       // 活动任务进度（旧存档无 → 首次进入任务页时初始化）
+      d.ev = { start: s.ev.start || "", end: s.ev.end || "",
+        nmKills: Math.max(0, s.ev.nmKills | 0), pteroKills: Math.max(0, s.ev.pteroKills | 0),
+        claim: s.ev.claim || {} };
+    }
+    if (!d.ev) {                                                                       // 活动任务：启动一轮 14 天（确保所有战斗都能累加进度）
+      const start = new Date().toDateString();
+      const end = new Date(new Date(start).getTime() + 14 * 86400000).toDateString();
+      d.ev = { start, end, nmKills: 0, pteroKills: 0, claim: {} };
+    }
     for (const t of TRAPS) {
       if (s.owned && t.id in s.owned) d.owned[t.id] = !!s.owned[t.id];   // 存档为准；未来新机关默认未拥有
       if (s.lv && s.lv[t.id] >= 1) d.lv[t.id] = Math.min(TRAP_LV_MAX, s.lv[t.id] | 0);
@@ -809,6 +910,7 @@ function loadLab() {
 let giftPop = null;            // 首次赠送奶石弹窗 {title, amount, sub}（点击任意处收下）
 let packOpen = false, packSel = -1;   // 新手礼包：面板打开 / 选中的卡池限定机关下标
 let poolOpen = false;                 // 卡池详情面板（抽卡页，点击任意处关闭）
+let exchOpen = false;                 // 圣眷珍材兑换面板（抽卡页，点面板外关闭）
 /* 新手礼包：从所有卡池限定机关中任选其一（已拥有的转换为材料×20），领取后标题页入口永久消失 */
 function claimPack() {
   const t = ltdPool()[packSel];
@@ -868,7 +970,11 @@ function drawGacha(times) {
       if (isLtd) lab.pityLtd = 0; else lab.pityLtd++;    // 出限定：重置限定保底；否则累计
       if (lab.owned[p.id]) {
         const conv = isLtd ? DUP_TO_MAT : DUP_TO_MAT_TRAP;
-        lab.mat += conv; items.push({ type: "trap", id: p.id, dup: true, conv });
+        lab.mat += conv;
+        if (isLtd) {          // 重复限定机关：额外获得圣眷珍材
+          lab.treasure += DUP_TO_TREASURE;
+          items.push({ type: "trap", id: p.id, dup: true, conv, treas: DUP_TO_TREASURE });
+        } else items.push({ type: "trap", id: p.id, dup: true, conv });
       } else {
         lab.owned[p.id] = true; lab.lv[p.id] = lab.lv[p.id] || 1;
         items.push({ type: "trap", id: p.id, dup: false });
@@ -884,6 +990,19 @@ function finishGacha() {            // 结束扭蛋动画 → 展示结果（动
   labResult = gachaAnim.items;
   sfxGacha();                       // 抽卡音效（上扬琶音）挪到揭晓时刻
   gachaAnim = null;
+}
+/* ---- 圣眷珍材兑换：5 个兑换任意一个卡池限定机关（兑换界面在抽卡页） ---- */
+function exchTrap(t) {
+  if (lab.treasure < TREASURE_COST) { hint(`圣眷珍材不足（需要 ×${TREASURE_COST}）`); return; }
+  lab.treasure -= TREASURE_COST;
+  if (lab.owned[t.id]) {            // 已拥有：按重复规则转换（材料 + 圣眷珍材）
+    lab.mat += DUP_TO_MAT; lab.treasure += DUP_TO_TREASURE;
+    hint(`已拥有「${t.name}」，转换为材料×${DUP_TO_MAT}＋圣眷珍材×${DUP_TO_TREASURE}`);
+  } else {
+    lab.owned[t.id] = true; lab.lv[t.id] = lab.lv[t.id] || 1;
+    hint(`已兑换「${t.name}」！`);
+  }
+  saveLab();
 }
 /* ---- 奶石获取：战斗结算 / 每日任务 ---- */
 const weekKey = () => { const d = new Date(), o = new Date(d.getFullYear(), 0, 1); return d.getFullYear() + "w" + (((d - o) / 6048e5) | 0); };
@@ -920,25 +1039,94 @@ const TASK_ROOKIE = [
   { id: "up1",     name: "为机关升级 1 次",         need: 1,   reward: 300, prog: () => lab.rookie.ups },
   { id: "lv10",    name: "守卫等级达到 10 级一次",  need: 10,  reward: 300, prog: () => lab.rookie.bestLv },
   { id: "own5",    name: "拥有 5 种不同的机关",     need: 5,   reward: 300, prog: () => TRAPS.filter(t => lab.owned[t.id]).length },
-  { id: "tech5",   name: "点亮科技树的 5 个节点",   need: 5,   reward: 400, prog: () => TECH_NODES.filter(n => lab.tech[n.id]).length },
+  { id: "tech5",   name: "点亮研发进度的 5 个节点",   need: 5,   reward: 400, prog: () => TECH_NODES.filter(n => lab.tech[n.id]).length },
   { id: "nm1",     name: "完成一次噩梦守卫",        need: 1,   reward: 300, prog: () => lab.rookie.nmDone ? 1 : 0 },
   { id: "all",     name: "完成其他新手任务",        need: 8,   reward: 600, prog: () => TASK_ROOKIE.slice(0, 8).filter(t => lab.rookie.claim[t.id]).length }
 ];
+/* ---- 活动任务：限时 14 天（首次进入任务页自动启动，过期/全部领完后从界面移除） ---- */
+const EV_DAYS = 14;
+function evInit() {
+  if (!lab.ev) {
+    const start = new Date().toDateString();
+    const end = new Date(new Date(start).getTime() + EV_DAYS * 86400000).toDateString();
+    lab.ev = { start, end, nmKills: 0, pteroKills: 0, claim: {} };
+    saveLab();
+  }
+}
+const evEndTs = () => lab.ev ? new Date(lab.ev.end).getTime() : 0;
+const todayTs = () => new Date().getTime();
+const evActive = () => lab.ev && evEndTs() >= todayTs();
+const EV_DAY_LEFT = () => {
+  if (!lab.ev) return EV_DAYS;
+  const left = Math.ceil((evEndTs() - todayTs()) / 86400000);
+  return Math.max(0, left);
+};
+const TASK_EVENT = [
+  { id: "nm200",  name: "在噩梦守卫中击败 200 个敌人",   need: 200, reward: { type: "stone", n: 200 }, prog: () => lab.ev ? Math.min(lab.ev.nmKills, 200) : 0 },
+  { id: "ptero1", name: "击败首领翼龙 1 次",             need: 1,   reward: { type: "stone", n: 200 }, prog: () => lab.ev ? Math.min(lab.ev.pteroKills, 1) : 0 },
+  { id: "bulb",   name: "完成其他活动任务",              need: 2,   reward: { type: "trap", id: "bulb" }, prog: () => lab.ev ? TASK_EVENT.slice(0, 2).filter(t => lab.ev.claim[t.id]).length : 0 }
+];
+function claimEvent(def) {
+  if (!lab.ev || lab.ev.claim[def.id] || def.prog() < def.need) return;
+  lab.ev.claim[def.id] = true;
+  if (def.reward.type === "stone") { lab.stone += def.reward.n; giftPop = { title: "活动奖励", amount: def.reward.n, sub: def.name }; }
+  else if (def.reward.type === "trap") {
+    const t = TRAPS.find(x => x.id === def.reward.id);
+    if (t) {
+      if (lab.owned[t.id]) { lab.mat += DUP_TO_MAT_TRAP; giftPop = { title: "活动奖励", trap: t.id, dup: true }; }
+      else { lab.owned[t.id] = true; lab.lv[t.id] = lab.lv[t.id] || 1; giftPop = { title: "活动奖励", trap: t.id, dup: false }; }
+    }
+  }
+  saveLab();
+}
+
 /* 行数据（绘制与点击共用），st: 0 未达成 / 1 可领取 / 2 已领取 */
 function taskRows() {
   const dk = dayKey();                                              // 跨日自动重置每日任务
   if (lab.dayKey !== dk) { lab.dayKey = dk; lab.dayKills = 0; lab.dayDone = false; saveLab(); }
   const rows = [{ kind: "daily", name: `消灭 ${DAY_KILL_NEED} 个敌人`,
-    prog: Math.min(lab.dayKills, DAY_KILL_NEED), need: DAY_KILL_NEED, reward: DAY_KILL_STONE,
+    prog: Math.min(lab.dayKills, DAY_KILL_NEED), need: DAY_KILL_NEED, reward: { type: "stone", n: DAY_KILL_STONE },
     st: lab.dayDone ? 2 : lab.dayKills >= DAY_KILL_NEED ? 1 : 0 }];
-  for (const def of TASK_ROOKIE) rows.push({ kind: "rookie", def, name: def.name,
-    prog: Math.min(def.prog(), def.need), need: def.need, reward: def.reward,
-    st: lab.rookie.claim[def.id] ? 2 : def.prog() >= def.need ? 1 : 0 });
+  if (evActive()) {
+    for (const def of TASK_EVENT) {
+      if (lab.ev.claim[def.id]) continue;                           // 已领取的活动任务从界面移除
+      rows.push({ kind: "event", def, name: def.name,
+        prog: Math.min(def.prog(), def.need), need: def.need, reward: def.reward,
+        st: def.prog() >= def.need ? 1 : 0 });
+    }
+  }
+  for (const def of TASK_ROOKIE) {
+    if (lab.rookie.claim[def.id]) continue;                        // 已领取的新手任务从界面移除
+    rows.push({ kind: "rookie", def, name: def.name,
+      prog: Math.min(def.prog(), def.need), need: def.need, reward: { type: "stone", n: def.reward },
+      st: def.prog() >= def.need ? 1 : 0 });
+  }
   return rows;
 }
-const taskRowRect = i => i === 0 ? { x: W / 2 - 360, y: 94, w: 720, h: 52 }
-                                 : { x: W / 2 - 360, y: 184 + (i - 1) * 52, w: 720, h: 50 };
-const taskBtnRect = r => ({ x: r.x + r.w - 124, y: r.y + 8, w: 112, h: 36 });
+/* ---- 任务页：每日 / 活动 / 新手（已领取自动移除，活动限时 14 天；内容可滚动 ---- */
+const TASK_VIEW_Y = 96;           // 任务内容视口顶部（标题/货币下方）
+const TASK_ROW_H = 46, TASK_ROW_GAP = 6, TASK_TITLE_H = 24, TASK_ROW_Y0 = 108;
+/* 按分区标题动态计算每行 rect（标题占 TASK_TITLE_H，行与行之间 TASK_ROW_GAP） */
+function taskRowRects() {
+  const rows = taskRows(), rects = [], titles = [];
+  let y = TASK_ROW_Y0, lastKind = "";
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].kind !== lastKind) {
+      lastKind = rows[i].kind;
+      titles.push({ i, y });
+      y += TASK_TITLE_H;                          // 分区标题占一行
+    }
+    rects.push({ x: W / 2 - 360, y, w: 720, h: TASK_ROW_H, row: rows[i] });
+    y += TASK_ROW_H + TASK_ROW_GAP;
+  }
+  return { rows, rects, titles, totalY: y };
+}
+const taskBtnRect = r => ({ x: r.x + r.w - 124, y: r.y + 7, w: 112, h: 32 });
+const taskMaxScroll = () => {
+  const { totalY } = taskRowRects();
+  const viewH = H - TASK_VIEW_Y - 10;
+  return Math.max(0, totalY - TASK_ROW_Y0 - viewH);
+};
 function claimDaily() {
   if (lab.dayDone || lab.dayKills < DAY_KILL_NEED) return;
   lab.dayDone = true; lab.stone += DAY_KILL_STONE; saveLab();
@@ -977,19 +1165,20 @@ let coins = COIN_START, life = LIFE_START, lifeMax = LIFE_START;
 let lv = 1, exp = 0, kills = 0, gameT = 0;
 let chosen = [];                      // 已选战略 id
 let mods = { atkAll: 0, defAll: 0, dmgUp: 0, healUp: 0, coinRate: 0, trapHp: 1, enemySpeed: 1, enemyAtkSpd: 1, trapMods: {} };
-let pendingStrats = 0, stratOpts = [];
+let pendingStrats = 0, stratOpts = [], rerollUsed = false;
 let selTrap = -1, demolishMode = false;
 let abortOpen = false;                  // 战斗中中止确认弹窗（打开时战斗暂停，确认后不结算直接返回首页）
 let bootBonusUsed = false;              // 靴子技能：每场战斗仅第一只靴子触发产币
 let labTab = "up", labResult = null;      // 研发所：当前页签（up 养成 / gacha 抽卡 / tech 科技树）/ 抽卡结果展示
 let gachaAnim = null;                     // 扭蛋机动画 {t, items}（摇柄→出蛋→爆开，结束后才展示结果，点击任意处跳过）
 let labUpScroll = 0, labDragY = null;     // 养成页：滚动偏移 / 触屏拖动的画布 y 坐标
+let taskScroll = 0;                        // 任务页：滚动偏移
 let hintMsg = "", hintT = 0;
 let mouse = { x: -99, y: -99 };
 let menuT = 0;
 
 /* 波次运行状态：waveIdx 已开始的波次数，nextWaveT 下一波开始的时刻，spawnQ 待出场敌人队列 */
-let waveIdx = 0, nextWaveT = 0, spawnQ = [], waveBannerT = 0;
+let waveIdx = 0, nextWaveT = 0, spawnQ = [], waveBannerT = 0, bossBannerT = 0;
 
 const expNeed = () => Math.min(lv, 4) * 100;   // 升级所需经验：100/200/300/400（400 封顶）
 
@@ -997,16 +1186,17 @@ function resetGame() {
   traps = []; enemies = []; fx = [];
   coins = COIN_START + (techLit("coin") ? 50 : 0); life = CUR.def.life || LIFE_START; lifeMax = life;   // 科技「战备资金」：初始奶龙币 +50
   lv = 1; exp = 0; kills = 0; gameT = 0;
-  chosen = []; pendingStrats = 0; stratOpts = [];
+  chosen = []; pendingStrats = 0; stratOpts = []; rerollUsed = false;
   selTrap = -1; demolishMode = false; abortOpen = false;
   bootBonusUsed = false;
   hintMsg = ""; hintT = 0;
-  waveIdx = 0; nextWaveT = WAVE_CFG.firstDelay; spawnQ = []; waveBannerT = 0;
+  waveIdx = 0; nextWaveT = WAVE_CFG.firstDelay; spawnQ = []; waveBannerT = 0; bossBannerT = 0;
   recomputeMods();
 }
 function startGame(mapIdx) {
   CUR = parseMap(MAPS[mapIdx == null ? (Math.random() * MAPS.length) | 0 : mapIdx]);
   resetGame();
+  if (techLit("wisdom")) gainExp(50);         // 科技「经验储备」：战斗开始时立即获得 50 守卫经验
   if (techLit("strat")) pendingStrats = 1;      // 科技「先发制人」：开局立即三选一战略（update 首帧触发）
   state = ST.PLAY;
 }
@@ -1037,16 +1227,22 @@ function abortBattle() {
    灵感获取：任意战斗击败至少 10 波敌人获得 2 灵感，每周上限 20（规则不写进科技树页面） */
 const INSPIRE_PER_BATTLE = 2;          // 单场≥10波获得的灵感
 const WEEK_INSPIRE_MAX = 20;           // 灵感周上限
+const TECH_EXCHANGE_STONE = 10;        // 全部点亮后：1 灵感兑换的奶石数
 const TECH_NODES = [
-  // x/y 为节点中心坐标（科技树页绘制/点击共用，已按并入研发所后的内容区下移）；req 为前置节点 id
-  { id: "atk1",  name: "攻击强化 I",   key: false, x: 230, y: 196, req: null,   desc: "所有机关攻击力 +5%", apply: m => { m.atkAll += 0.05; } },
-  { id: "atk2",  name: "攻击强化 II",  key: false, x: 230, y: 348, req: "atk1", desc: "所有机关攻击力 +5%", apply: m => { m.atkAll += 0.05; } },
-  { id: "atk3",  name: "攻击强化 III", key: false, x: 230, y: 500, req: "atk2", desc: "所有机关攻击力 +5%", apply: m => { m.atkAll += 0.05; } },
-  { id: "def1",  name: "防御强化",     key: false, x: 576, y: 196, req: null,   desc: "所有机关防御力 +5%", apply: m => { m.defAll += 0.05; } },
-  { id: "coin",  name: "战备资金",     key: true,  x: 576, y: 348, req: "def1", desc: "战斗开始时奶龙币 +50" },
-  { id: "hp1",   name: "生命强化 I",   key: false, x: 922, y: 196, req: null,   desc: "所有机关生命值 +5%", apply: m => { m.trapHp *= 1.05; } },
-  { id: "hp2",   name: "生命强化 II",  key: false, x: 922, y: 348, req: "hp1",  desc: "所有机关生命值 +5%", apply: m => { m.trapHp *= 1.05; } },
-  { id: "strat", name: "先发制人",     key: true,  x: 922, y: 500, req: "hp2",  desc: "战斗开始时立即选择一个战略" }
+  // x/y 为节点中心坐标（科技树页绘制/点击共用，3 列 × 5 行）；req 为前置节点 id；关键节点与普通节点交替穿插
+  { id: "atk1",  name: "攻击强化 I",   key: false, x: 230, y: 165, req: null,   desc: "所有机关攻击力 +5%", apply: m => { m.atkAll += 0.05; } },
+  { id: "atk2",  name: "攻击强化 II",  key: false, x: 230, y: 263, req: "atk1", desc: "所有机关攻击力 +5%", apply: m => { m.atkAll += 0.05; } },
+  { id: "atk3",  name: "攻击强化 III", key: false, x: 230, y: 361, req: "atk2", desc: "所有机关攻击力 +5%", apply: m => { m.atkAll += 0.05; } },
+  { id: "spd1",  name: "迅捷",         key: false, x: 230, y: 459, req: "atk3", desc: "所有机关攻击速度 +3%", apply: m => { m.atkSpd += 0.03; } },
+  { id: "def1",  name: "防御强化",     key: false, x: 576, y: 165, req: null,   desc: "所有机关防御力 +5%", apply: m => { m.defAll += 0.05; } },
+  { id: "coin",  name: "战备资金",     key: true,  x: 576, y: 263, req: "def1", desc: "战斗开始时奶龙币 +50" },
+  { id: "def2",  name: "防御强化 II",  key: false, x: 576, y: 361, req: "coin", desc: "所有机关防御力 +5%", apply: m => { m.defAll += 0.05; } },
+  { id: "wisdom", name: "经验储备",    key: true,  x: 576, y: 459, req: "def2", desc: "战斗开始时立即获得 50 守卫经验" },
+  { id: "hp1",   name: "生命强化 I",   key: false, x: 922, y: 165, req: null,    desc: "所有机关生命值 +5%", apply: m => { m.trapHp *= 1.05; } },
+  { id: "strat", name: "先发制人",     key: true,  x: 922, y: 263, req: "hp1",   desc: "战斗开始时立即选择一个战略" },
+  { id: "hp2",   name: "生命强化 II",  key: false, x: 922, y: 361, req: "strat", desc: "所有机关生命值 +5%", apply: m => { m.trapHp *= 1.05; } },
+  { id: "reroll", name: "运筹帷幄",    key: true,  x: 922, y: 459, req: "hp2",   desc: "选择战略时可刷新一次选项（每次选择限一次）" },
+  { id: "hp3",   name: "生命强化 III", key: false, x: 922, y: 557, req: "reroll", desc: "所有机关生命值 +5%", apply: m => { m.trapHp *= 1.05; } }
 ];
 const techNode = id => TECH_NODES.find(n => n.id === id);
 const techLit  = id => !!lab.tech[id];
@@ -1067,11 +1263,20 @@ function techClick(n) {
   }
   saveLab();
 }
+/* 全部点亮后：多余灵感兑换奶石（1 灵感 = 10 奶石） */
+const techAllLit = () => TECH_NODES.every(n => techLit(n.id));
+function techExchange() {
+  if (!techAllLit()) return;
+  if (lab.inspire < 1) { hint("灵感不足"); return; }
+  lab.inspire -= 1; lab.stone += TECH_EXCHANGE_STONE;
+  saveLab();
+  hint(`已兑换：灵感 ×1 → 奶石 ×${TECH_EXCHANGE_STONE}`);
+}
 
 /* ================= 战略系统 ================= */
 function recomputeMods() {
   const ratios = traps.map(t => t.hpMax ? t.hp / t.hpMax : 1);
-  mods = { atkAll: 0, defAll: 0, dmgUp: 0, healUp: 0, coinRate: 0, trapHp: 1, enemySpeed: 1, enemyAtkSpd: 1, trapMods: {} };
+  mods = { atkAll: 0, defAll: 0, dmgUp: 0, healUp: 0, coinRate: 0, trapHp: 1, enemySpeed: 1, enemyAtkSpd: 1, atkSpd: 0, trapMods: {} };
   for (const id of chosen) { const s = STRATEGIES.find(x => x.id === id); if (s) s.apply(mods); }
   for (const n of TECH_NODES) if (techLit(n.id) && n.apply) n.apply(mods);   // 科技树加成：与战略同乘区（攻%/防%加算、生命%乘算），作用于所有模式
   traps.forEach((t, i) => {
@@ -1101,7 +1306,7 @@ function pickStrat(opt) {
   pendingStrats--;
   if (pendingStrats > 0) {
     const o = drawStratOptions();
-    if (o.length) { stratOpts = o; return; }
+    if (o.length) { stratOpts = o; rerollUsed = false; return; }   // 连升多级：下一次选择恢复刷新机会
     pendingStrats = 0;
   }
   state = ST.PLAY;
@@ -1117,11 +1322,21 @@ function hint(msg) { hintMsg = msg; hintT = 1.6; }
    例：局外 600、局内 +40% 与 +100 → 600×1.4 + 100 = 940；百分比字段 atk/defPct/hpF 等存于 mods.trapMods[机关id] */
 /* 机关当前生命比例：伪实例（炸弹）无生命值 → 视为满血 */
 const hpRatioOf = t => (t.hpMax ? t.hp / t.hpMax : 1);
-function trapAtkOf(t, extra = 0, extraFlat = 0) {
+function trapAtkOf(t, extra = 0, extraFlat = 0, noAdj = false) {
   const tm = mods.trapMods[t.base.id] || {};
   /* 随机应变：生命高于 50% 时攻击力 +20%（伪实例如炸弹无生命值，视为满血） */
   const adap = chosen.includes("adapt") && hpRatioOf(t) > 0.5 ? 0.2 : 0;
-  return Math.round(t.base.atk * (1 + mods.atkAll + (tm.atk || 0) + extra + adap) + (tm.atkF || 0) + extraFlat + (t.energizeT > 0 ? ENERGIZE_ATK : 0));   // energizeT：精力充沛 buff，+250 走固定值最后加算
+  /* 灯泡光环：每个上下左右相邻的灯泡按自身攻击力的 50% 提高本机关攻击力（固定值最后加算）；
+     noAdj：计算灯泡自身攻击力时不再叠加其它灯泡的光环，避免两只相邻灯泡互相放大（无限反馈） */
+  let adjBuff = 0;
+  if (!noAdj && t.c != null) {
+    for (const o of traps) {
+      if (o.dead || !o.base.buff || o === t) continue;
+      if (Math.abs(o.c - t.c) + Math.abs(o.r - t.r) === 1)
+        adjBuff += Math.round(trapAtkOf(o, 0, 0, true) * o.base.buff);
+    }
+  }
+  return Math.round(t.base.atk * (1 + mods.atkAll + (tm.atk || 0) + extra + adap) + (tm.atkF || 0) + extraFlat + (t.energizeT > 0 ? ENERGIZE_ATK : 0) + adjBuff);   // energizeT：精力充沛 buff，+250 走固定值最后加算
 }
 function trapDefOf(t) {
   const tm = mods.trapMods[t.base.id] || {};
@@ -1135,7 +1350,7 @@ function trapHpMaxOf(base) { const tm = mods.trapMods[base.id] || {}; return Mat
    守卫等级独立伤害提升为另一乘区，与普通伤害提升互相乘算：lv.1 无提升，lv.2 +10%，lv.3 +20%，以此类推 */
 function lvDmgMul() { return 1 + Math.max(0, lv - 1) * 0.1; }
 function trapDmgOf(t, def, extra = 0) { return Math.round(calcDmg(trapAtkOf(t, extra), def) * (1 + mods.dmgUp) * lvDmgMul()); }
-function trapIntervalOf(t) { const tm = mods.trapMods[t.base.id] || {}; return Math.max(0.2, t.base.interval * (tm.interval || 1) + (tm.intervalFlat || 0)); }   // intervalFlat：固定减少（百步穿杨 -0.5 秒）
+function trapIntervalOf(t) { const tm = mods.trapMods[t.base.id] || {}; return Math.max(0.2, (t.base.interval * (tm.interval || 1) + (tm.intervalFlat || 0)) / (1 + (mods.atkSpd || 0))); }   // intervalFlat：固定减少（百步穿杨 -0.5 秒）；atkSpd：科技「迅捷」攻击速度 +3%（攻击间隔 ÷1.03）
 function buildAt(c, r) {
   const lt = loadout[selTrap];
   if (!lt) { hint(loadout.length ? "先选择要建造的机关" : "暂无可用机关，等待后续更新"); return false; }
@@ -1146,7 +1361,7 @@ function buildAt(c, r) {
   coins -= base.cost;
   if (base.id === "bomb") {                            // 炸弹：立即对周围 2 格敌人造成伤害并损毁（不驻场）
     const bx = GRID_OX + c * CELL + CELL / 2, by = GRID_OY + r * CELL + CELL / 2;
-    const bt = { base };                               // 伪实例：复用局内攻击/伤害加成公式
+    const bt = { base, c, r };                       // 伪实例：复用局内攻击/伤害加成公式（c/r 供灯泡光环判定相邻）
     for (const e of enemies) {
       if (e.dead) continue;
       if (Math.hypot(e.x - bx, e.y - by) <= BOMB_RANGE * CELL) {
@@ -1163,7 +1378,7 @@ function buildAt(c, r) {
   traps.push({
     base, c, r,
     x: GRID_OX + c * CELL + CELL / 2, y: GRID_OY + r * CELL + CELL / 2,
-    hp: hpMax, hpMax, cd: 0, blocked: [], dead: false, flash: 0, frzT: 0, bonusT: 0, magicN: 0, charge: 0
+    hp: hpMax, hpMax, cd: 0, blocked: [], dead: false, flash: 0, frzT: 0, bonusT: 0, magicN: 0, charge: 0, burnT: 0
   });
   if (base.id === "boots" && !bootBonusUsed) {          // 靴子技能：每场战斗仅第一只靴子触发
     bootBonusUsed = true;
@@ -1189,7 +1404,7 @@ const resOf = (base, k) => Math.min(1, (base.res && base.res[k]) || 0);
 const PARA_TIME = 0.8;                       // 麻痹时长（秒）：无法移动（被阻挡时的攻击不受影响）
 const FREEZE_TIME = 1;                       // 冻结时长（秒）：机关无法行动（攻击/治疗/冷却暂停，阻挡仍有效）
 const BOOT_BONUS_TIME = 5, BOOT_COIN_RATE = 100;   // 靴子技能：首建后 5 秒内每秒 +100 奶龙币（共 500）
-const THORN_SLOW = 0.8, THORN_DPS = 150;           // 荆棘光环：所在格敌人移速 -80% + 每秒 150 真实伤害
+const THORN_SLOW = 0.85, THORN_DPS = 150;          // 荆棘光环：所在格敌人移速 -85% + 每秒 150 真实伤害
 const ENERGIZE_TIME = 5, ENERGIZE_ATK = 250;       // 精力充沛：受注射剂治疗后的攻击 buff 时长与数值
 const BIRD_ATK_PAUSE = 0.5;                        // 飞鸟攻击时的定身时长（秒）
 const SWEEP_RANGE = 1.3;                            // 武士挥砍：前方半圆的半径（格）
@@ -1197,9 +1412,16 @@ const BOMB_RANGE = 2;                        // 炸弹爆破半径（格）：�
 const STUN_TIME = 2;                         // 晕眩时长（秒）：无法移动也无法攻击
 const BOW_CHARGE_MUL = 0.5;                  // 弓箭蓄力：每层 +50% 攻击力（开火后清零）
 const bowChargeMax = () => chosen.includes("snipe") ? 3 : 2;   // 蓄力层数上限（百步穿杨 +1）
+const BURN_TIME = 5, BURN_DPS = 125;         // 灼烧（翼龙技能）：持续 5 秒，每秒 125 点真实伤害（无视防御）
+const BOSS_BURN_BONUS = 1.8;                 // 翼龙对处于灼烧状态的机关造成的伤害 +80%
 function waveMul(no) { return Math.pow(WAVE_CFG.scaleMul, Math.max(0, no - WAVE_CFG.lateWave)); }
 const fmtMul = m => { const s = m.toFixed(2); return s.endsWith("0") ? s.slice(0, -1) : s; };   // ×1.1 / ×1.21
 function waveEliteChance(no) { return no > WAVE_CFG.lateWave ? WAVE_CFG.eliteChanceLate : WAVE_CFG.eliteChance; }
+/* 首领刷新概率：第 5 波之后每波提升 bossChanceStep，上限 bossChanceCap；第 5 波及之前为 0 */
+function waveBossChance(no) {
+  if (no <= WAVE_CFG.bossWaveFrom) return 0;
+  return Math.min(WAVE_CFG.bossChanceCap, WAVE_CFG.bossChanceBase + (no - WAVE_CFG.bossWaveFrom - 1) * WAVE_CFG.bossChanceStep);
+}
 function waveCount(no) {                     // 每波刷怪数量：随波次提高（每 countGrowEvery 波 +1），有上限
   const b = WAVE_CFG.countBase + (((no - 1) / WAVE_CFG.countGrowEvery) | 0);
   return Math.min(WAVE_CFG.countCap, b + ((Math.random() * (WAVE_CFG.countRand + 1)) | 0));
@@ -1208,7 +1430,15 @@ function waveCount(no) {                     // 每波刷怪数量：随波次�
 function startWave() {
   waveIdx++;
   const mul = waveMul(waveIdx);
-  const normals = ENEMIES.filter(e => e.tier !== "elite");
+  const bossChance = waveBossChance(waveIdx);
+  const bosses = ENEMIES.filter(e => e.tier === "boss");
+  if (bosses.length && Math.random() < bossChance) {      // 首领波：该波只刷一只首领，不再刷新其他敌人
+    const base = bosses[(Math.random() * bosses.length) | 0];
+    spawnQ.push({ base, spawn: (Math.random() * CUR.spawns.length) | 0, mul, t: gameT });
+    waveBannerT = 2.2; bossBannerT = 3.2;
+    return;
+  }
+  const normals = ENEMIES.filter(e => e.tier === "normal");   // 精英与首领不进入普通池（精英按概率单独判定）
   const elites  = ENEMIES.filter(e => e.tier === "elite");
   const count = waveCount(waveIdx);
   for (let i = 0; i < count; i++) {
@@ -1229,26 +1459,37 @@ function spawnEnemy(q) {
     base: b, route, routeIdx: 1,
     x: route[0].x, y: route[0].y,
     hp, maxHp: hp, atk: Math.round(b.atk * q.mul * (nmRun ? NM_ATK_MUL : 1)), def: Math.round(b.def * q.mul), interval: b.interval,   // 噩梦守卫：敌人攻击 ×150%
-    flying: !!b.flying, elite: b.tier === "elite",
+    flying: !!b.flying, elite: b.tier !== "normal", boss: b.tier === "boss",   // 首领与精英共用精英标记（金框/皇冠），首领额外放大
     cd: 0, blockedBy: null, dead: false, flash: 0, paraT: 0, stunT: 0,
     jx: Math.random() * 12 - 6, jy: Math.random() * 8 - 4
   });
 }
-/* 敌人对机关造成伤害的统一出口（含机关死亡处理：释放被阻挡敌人、碎裂音效与特效） */
-function hurtTrap(t, atk) {
-  t.hp -= calcDmg(atk, trapDefOf(t));
-  t.flash = 0.12;
-  if (t.hp > 0) return;
+/* 机关死亡处理：释放被阻挡敌人、碎裂音效与特效 */
+function trapDie(t) {
   t.dead = true;
   sfxTrapDie();                                      // 机关被击败音效（低沉碎裂）
   for (const b of t.blocked) b.blockedBy = null;
   t.blocked.length = 0;
   fx.push({ type: "burst", x: t.x, y: t.y, ttl: 0.4, color: "#b8c4d0" });
 }
+/* 敌人对机关造成伤害的统一出口（按机关防御结算） */
+function hurtTrap(t, atk) {
+  t.hp -= calcDmg(atk, trapDefOf(t));
+  t.flash = 0.12;
+  if (t.hp > 0) return;
+  trapDie(t);
+}
+/* 真实伤害（无视防御）：灼烧等持续伤害专用，不刷新白闪 */
+function hurtTrapTrue(t, dmg) {
+  t.hp -= dmg;
+  if (t.hp <= 0 && !t.dead) trapDie(t);
+}
 function hurtEnemy(e, dmg, quiet) {
   e.hp -= dmg; if (!quiet) e.flash = 0.1;
   if (e.hp <= 0 && !e.dead) {
     e.dead = true; kills++; lab.rookie.kills++;        // rookie.kills：新手任务（累计消灭），随结算落盘
+    if (nmRun) lab.ev.nmKills++;                        // 活动任务：噩梦守卫中击杀
+    if (e.base.tier === "boss") lab.ev.pteroKills++;    // 活动任务：击败首领（当前只有翼龙）
     sfxEnemyDie();
     gainExp(e.base.exp);
     fx.push({ type: "burst", x: e.x + e.jx, y: e.y + e.jy, ttl: 0.4, color: e.base.color || "#c060ff" });
@@ -1260,6 +1501,7 @@ function update(dt) {
   if (hintT > 0) hintT -= dt;
   if (shakeT > 0) shakeT -= dt;
   if (waveBannerT > 0) waveBannerT -= dt;
+  if (bossBannerT > 0) bossBannerT -= dt;
 
   /* ---- 波次调度：到点开新波（不超过总波次数）；波内敌人按 spawnGap 依次从出生点出场 ---- */
   if (waveIdx < maxWaveNow() && gameT >= nextWaveT) { startWave(); nextWaveT = gameT + WAVE_CFG.gap; }
@@ -1279,7 +1521,7 @@ function update(dt) {
     if (onThorn) { hurtEnemy(e, THORN_DPS * dt, true); if (e.dead) continue; }   // 荆棘：每秒 150 真实伤害（quiet 不刷屏白闪）
     if (e.blockedBy) {
       if (e.blockedBy.dead) { e.blockedBy = null; }
-      else if (e.stunT <= 0) {                        // 晕眩：无法行动（不攻击、冷却也不推进）
+      else if (e.stunT <= 0 && !e.base.atkRange) {    // 远程敌人被阻挡时改用远程攻击，不走近战（避免同一回合双重攻击）
         e.cd -= dt;
         if (e.cd <= 0) {
           e.cd = e.interval / mods.enemyAtkSpd;      // 疲惫：敌攻击速度 -18% → 攻击间隔变长
@@ -1301,20 +1543,27 @@ function update(dt) {
         }
       }
     }
-    if (e.base.atkRange && !e.dead && e.stunT <= 0) {   // 飞鸟：对 atkRange 格内最近的机关发起远程攻击（晕眩时无法行动；范围内无机关则待命不耗冷却）
+    if (e.base.atkRange && !e.dead && e.stunT <= 0) {   // 远程机关攻击：对 atkRange 格内最近的 maxTargets 个机关发起攻击（晕眩时无法行动；范围内无机关则待命不耗冷却）
       e.cd -= dt;
       if (e.cd <= 0) {
-        let tgt = null, bd = Infinity;
+        const near = [];
+        const maxN = e.base.maxTargets || 1;
         for (const t of traps) {
           if (t.dead) continue;
           const d = Math.hypot(t.x - e.x, t.y - e.y);
-          if (d <= e.base.atkRange * CELL && d < bd) { bd = d; tgt = t; }
+          if (d <= e.base.atkRange * CELL) near.push({ t, d });
         }
-        if (tgt) {
+        if (near.length) {
+          near.sort((a, b) => a.d - b.d);
           e.cd = e.interval / mods.enemyAtkSpd;
-          e.atkPauseT = BIRD_ATK_PAUSE;              // 攻击时短暂无法移动
-          fx.push({ type: "tracer", x1: e.x, y1: e.y - AIR_LIFT, x2: tgt.x, y2: tgt.y, ttl: 0.09 });
-          hurtTrap(tgt, e.atk);
+          if (maxN === 1) e.atkPauseT = BIRD_ATK_PAUSE;   // 飞鸟：单体攻击时短暂无法移动
+          for (let i = 0; i < Math.min(maxN, near.length); i++) {
+            const t = near[i].t;
+            fx.push({ type: "tracer", x1: e.x, y1: e.y - AIR_LIFT, x2: t.x, y2: t.y, ttl: 0.09 });
+            const dmg = Math.round(e.atk * ((t.burnT || 0) > 0 ? BOSS_BURN_BONUS : 1));   // 对灼烧状态的机关伤害 +80%
+            hurtTrap(t, dmg);
+            if (e.base.burn && !t.dead) t.burnT = BURN_TIME;    // 灼烧：刷新为 5 秒（每秒 125 真实伤害）
+          }
         }
       }
     }
@@ -1336,11 +1585,11 @@ function update(dt) {
           }
         } else { e.x += dx / d * rest; e.y += dy / d * rest; rest = 0; }
       }
-      // 阻挡判定：当前所在格有未满阻挡的路线机关 → 停靠（飞行敌人不被阻挡）
-      if (!e.dead && !e.flying) {
+      // 阻挡判定：当前所在格有未满阻挡的路线机关 → 停靠（飞行敌人仅能被 blockAir 机关阻挡）
+      if (!e.dead) {
         const cc = Math.floor((e.x - GRID_OX) / CELL), cr = Math.floor((e.y - GRID_OY) / CELL);
         const t = trapAt(cc, cr);
-        if (t && cellChar(cc, cr) === "#" && t.blocked.length < trapBlockOf(t)) {
+        if (t && cellChar(cc, cr) === "#" && (!e.flying || t.base.blockAir) && t.blocked.length < trapBlockOf(t)) {
           e.blockedBy = t; t.blocked.push(e);
         }
       }
@@ -1358,8 +1607,19 @@ function update(dt) {
       coins = Math.min(COIN_MAX, coins + BOOT_COIN_RATE * dtb);
     }
     if (t.energizeT > 0) t.energizeT -= dt;          // 精力充沛：攻击 buff 计时（冻结不影响计时）
+    if (t.burnT > 0) {                               // 灼烧（翼龙）：每秒 125 点真实伤害，无视防御，冻结也持续
+      const dtb = Math.min(dt, t.burnT);
+      t.burnT -= dtb;
+      if (t.burnT < 1e-9) t.burnT = 0;
+      hurtTrapTrue(t, BURN_DPS * dtb);
+      if (t.dead) continue;
+    }
     t.blocked = t.blocked.filter(e => !e.dead && e.blockedBy === t);
+    if (t.base.regenBlock && t.blocked.length) {          // 守望屏障：每阻挡 1 名敌人，每秒恢复 3% 生命上限（冻结时也持续）
+      t.hp = Math.min(t.hpMax, t.hp + t.hpMax * t.base.regenBlock * t.blocked.length * dt);
+    }
     if (t.frzT > 0) { t.frzT -= dt; continue; }        // 冻结：无法行动（攻击/治疗/冷却全部暂停，阻挡仍有效）
+    if (t.base.buff) continue;                          // 灯泡：不攻击，攻击力光环为被动效果（冻结时也持续生效，同荆棘）
     t.cd -= dt;
     if (t.base.heal) {                                 // 治疗机关：为 range 格内生命最低的受损友方机关回血
       if (t.cd <= 0) {
@@ -1444,7 +1704,7 @@ function update(dt) {
   /* ---- 升级 → 三选一战略 ---- */
   if (pendingStrats > 0) {
     const opts = drawStratOptions();
-    if (opts.length) { stratOpts = opts; state = ST.STRAT; }
+    if (opts.length) { stratOpts = opts; rerollUsed = false; state = ST.STRAT; }   // 每次进入三选一恢复刷新机会
     else pendingStrats = 0;
   }
 
@@ -1461,15 +1721,17 @@ const BTN_MENU_NM    = { x: W / 2 - 190, y: 420, w: 180, h: 48 };
 const BTN_MENU_LAB   = { x: W / 2 + 10,  y: 420, w: 180, h: 48 };
 const BTN_MENU_TASK  = { x: W / 2 + 210, y: 420, w: 180, h: 48 };
 const BTN_PACK       = { x: W - 168, y: 14, w: 150, h: 42 };                       // 新手礼包入口（领取后消失）
-const PACK_PANEL     = { x: (W - 640) / 2, y: (H - 380) / 2, w: 640, h: 380 };     // 新手礼包面板
-const BTN_PACK_OK    = { x: W / 2 - 160, y: PACK_PANEL.y + 310, w: 140, h: 44 };
-const BTN_PACK_NO    = { x: W / 2 + 20,  y: PACK_PANEL.y + 310, w: 140, h: 44 };
+/* 新手礼包面板宽度按限定机关数量自适应（卡片 260 + 间距 20 + 内边距 40） */
+const packPanelW = () => Math.min(W - 24, ltdPool().length * 260 + (ltdPool().length - 1) * 20 + 40);
+const PACK_PANEL_Y = (H - 380) / 2;
+const BTN_PACK_OK    = { x: W / 2 - 160, y: PACK_PANEL_Y + 310, w: 140, h: 44 };
+const BTN_PACK_NO    = { x: W / 2 + 20,  y: PACK_PANEL_Y + 310, w: 140, h: 44 };
 function packCardRects() {                       // 卡池限定机关卡片（260×200，面板内居中排开）
   const n = ltdPool().length, cw = 260, gap = 20, x0 = W / 2 - (n * cw + (n - 1) * gap) / 2;
-  return ltdPool().map((t, i) => ({ t, i, x: x0 + i * (cw + gap), y: PACK_PANEL.y + 96, w: cw, h: 200 }));
+  return ltdPool().map((t, i) => ({ t, i, x: x0 + i * (cw + gap), y: PACK_PANEL_Y + 96, w: cw, h: 200 }));
 }
-const BTN_LO_GO   = { x: W / 2 + 21,  y: 452, w: 168, h: 46 };
-const BTN_LO_BACK = { x: W / 2 - 189, y: 452, w: 140, h: 46 };
+const BTN_LO_GO   = { x: W / 2 + 21,  y: 552, w: 168, h: 46 };
+const BTN_LO_BACK = { x: W / 2 - 189, y: 552, w: 140, h: 46 };
 /* 噩梦守卫界面按钮 */
 const nmRowRect = i => ({ x: W / 2 - 320, y: 226 + i * 48, w: 640, h: 40 });
 const nmRowBtnRect = r => ({ x: r.x + r.w - 118, y: r.y + 5, w: 104, h: 30 });
@@ -1486,9 +1748,10 @@ const BTN_LAB_BACK = IS_TOUCH ? { x: 14, y: 14, w: 112, h: 36, label: "← 返�
 const BTN_TAB_UP   = { x: W / 2 - 300, y: 56, w: 190, h: 42 };
 const BTN_TAB_GA   = { x: W / 2 - 95,  y: 56, w: 190, h: 42 };
 const BTN_TAB_TECH = { x: W / 2 + 110, y: 56, w: 190, h: 42 };
-const BTN_DRAW1  = { x: W / 2 - 230, y: 416, w: 210, h: 58 };
-const BTN_DRAW10 = { x: W / 2 + 20,  y: 416, w: 210, h: 58 };
+const BTN_DRAW1  = { x: W / 2 - 80,  y: 416, w: 190, h: 58 };
+const BTN_DRAW10 = { x: W / 2 + 130, y: 416, w: 190, h: 58 };
 const BTN_POOL   = { x: W / 2 + 138, y: 126, w: 130, h: 32 };   // 卡池详情入口（抽卡页右上）
+const BTN_EXCH   = { x: W / 2 - 308, y: 416, w: 170, h: 58 };   // 圣眷之礼：和抽一次/抽十次按钮并排（左中右）
 const DEMOLISH_BTN = { x: W - 126, y: 579, w: 110, h: 46 };
 const BTN_ABORT      = { x: 14, y: 562, w: 88, h: 26 };           // 战斗中止入口（底部栏顶边左侧，避开费用文本与机关槽）
 const BTN_ABORT_YES  = { x: W / 2 - 170, y: 336, w: 150, h: 46 }; // 中止确认
@@ -1522,6 +1785,7 @@ function stratCardRects() {
   for (let i = 0; i < 3; i++) out.push({ x: x0 + i * (w + gap), y, w, h, i });
   return out;
 }
+const BTN_STRAT_REROLL = { x: W / 2 - 100, y: 436, w: 200, h: 44 };   // 科技「运筹帷幄」：战略选项刷新按钮（卡片下方）
 function labUpCardRects() {     // 研发所·养成页 机关卡片（每行 3 张）
   const out = [];
   const w = 320, h = 440, gap = 24, y0 = 116, per = 3;
@@ -1549,6 +1813,11 @@ function onPointerDown(p) {
   if (giftPop) { giftPop = null; return; }                     // 赠送弹窗展示中：点击任意处收下
   startBGM();                                                  // 首次交互启动背景音乐（自动播放策略）
   if (poolOpen) { poolOpen = false; return; }                  // 卡池详情展示中：点击任意处关闭
+  if (exchOpen) {                                              // 圣眷珍材兑换面板：点面板外关闭，面板内只响应兑换按钮
+    if (!hitR(p, exchPanelRect())) exchOpen = false;
+    else for (const r of exchCardRects()) if (hitR(p, exchBtnRect(r))) { exchTrap(r.t); return; }
+    return;
+  }
   if (packOpen) {                                              // 新手礼包面板：屏蔽底层点击
     if (hitR(p, BTN_PACK_NO)) { packOpen = false; packSel = -1; return; }
     for (const r of packCardRects()) if (hitR(p, r)) { packSel = r.i; return; }
@@ -1584,7 +1853,7 @@ function onPointerDown(p) {
     for (const r of inventoryRects()) {          // 点图鉴卡片：加入/移出携带（至多 6 个）
       if (hitR(p, r)) {
         const t = TRAPS[r.i], idx = loadout.indexOf(t);
-        if (!lab.owned[t.id]) { hint("「" + t.name + "」未解锁，可在研发所抽卡获得"); return; }
+        if (!lab.owned[t.id]) { hint("「" + t.name + "」未解锁，可在研发基地扭蛋获得"); return; }
         if (nmPhase === 2 && nmRun.teamA.includes(t)) { hint("「" + t.name + "」已在第一队上阵"); return; }   // 噩梦守卫：同一机关不能重复上阵
         if (idx >= 0) loadout.splice(idx, 1);
         else if (loadout.length < 6) loadout.push(t);
@@ -1616,6 +1885,11 @@ function onPointerDown(p) {
       buildAt(cell.c, cell.r);
     }
   } else if (state === ST.STRAT) {
+    if (techLit("reroll") && !rerollUsed && hitR(p, BTN_STRAT_REROLL)) {   // 科技「运筹帷幄」：刷新战略选项（每次选择限一次）
+      const o = drawStratOptions();
+      if (o.length) { stratOpts = o; rerollUsed = true; }
+      return;
+    }
     for (const r of stratCardRects()) if (hitR(p, r) && stratOpts[r.i]) { pickStrat(stratOpts[r.i]); return; }
   } else if (state === ST.LAB) {
     if (labResult) { labResult = null; return; }                 // 抽卡结果展示中：点击任意处关闭
@@ -1631,11 +1905,13 @@ function onPointerDown(p) {
         if (hitR(p, b)) { upgradeTrap(TRAPS[r.i].id); return; }
       }
     } else if (labTab === "tech") {
+      if (techAllLit() && hitR(p, BTN_TECH_EXCHANGE)) { techExchange(); return; }
       for (const n of TECH_NODES) if (hitR(p, techRect(n))) { techClick(n); return; }
     } else {
       if (hitR(p, BTN_DRAW1)) { drawGacha(1); return; }
       if (hitR(p, BTN_DRAW10)) { drawGacha(10); return; }
       if (hitR(p, BTN_POOL)) { poolOpen = true; return; }
+      if (hitR(p, BTN_EXCH)) { exchOpen = true; return; }
     }
   } else if (state === ST.WIN || state === ST.LOSE) {
     if (hitR(p, BTN_END_AGAIN)) { state = ST.LOADOUT; return; }
@@ -1655,10 +1931,16 @@ function onPointerDown(p) {
     if (hitR(p, BTN_NME_HOME)) { nmRun = null; state = ST.MENU; return; }
   } else if (state === ST.TASK) {
     if (hitR(p, BTN_LAB_BACK)) { state = ST.MENU; return; }
-    const rows = taskRows();
-    for (let i = 0; i < rows.length; i++) {
-      if (rows[i].st === 1 && hitR(p, taskBtnRect(taskRowRect(i)))) {
-        rows[i].kind === "daily" ? claimDaily() : claimRookie(rows[i].def);
+    if (p.y < TASK_VIEW_Y) return;                              // 视口外（标题/货币区）不触发行点击
+    const { rows, rects } = taskRowRects();
+    for (let i = 0; i < rects.length; i++) {
+      if (rows[i].st !== 1) continue;
+      const b = taskBtnRect(rects[i]); b.y -= taskScroll;       // 按钮随内容滚动
+      if (hitR(p, b)) {
+        const kind = rows[i].kind;
+        if (kind === "daily") claimDaily();
+        else if (kind === "rookie") claimRookie(rows[i].def);
+        else if (kind === "event") claimEvent(rows[i].def);
         return;
       }
     }
@@ -1687,16 +1969,22 @@ canvas.addEventListener("touchstart", e => {
 canvas.addEventListener("touchmove", e => {
   e.preventDefault();
   mouse = canvasPos(e.changedTouches[0]);
-  if (labDragY != null && state === ST.LAB && labTab === "up") {   // 养成页拖动滑屏（画布坐标系，旋转屏自适配）
+  if (labDragY != null && (state === ST.LAB && labTab === "up")) {   // 养成页拖动滑屏（画布坐标系，旋转屏自适配）
     labUpScroll = Math.max(0, Math.min(labUpMaxScroll(), labUpScroll + (labDragY - mouse.y)));
+    labDragY = mouse.y;
+  } else if (labDragY != null && state === ST.TASK) {                // 任务页拖动滑屏
+    taskScroll = Math.max(0, Math.min(taskMaxScroll(), taskScroll + (labDragY - mouse.y)));
     labDragY = mouse.y;
   }
 }, { passive: false });
 canvas.addEventListener("touchend", () => { labDragY = null; });
-canvas.addEventListener("wheel", e => {                            // 桌面端滚轮滑动养成页
+canvas.addEventListener("wheel", e => {                            // 桌面端滚轮滑动
   if (state === ST.LAB && labTab === "up") {
     e.preventDefault();
     labUpScroll = Math.max(0, Math.min(labUpMaxScroll(), labUpScroll + e.deltaY));
+  } else if (state === ST.TASK) {
+    e.preventDefault();
+    taskScroll = Math.max(0, Math.min(taskMaxScroll(), taskScroll + e.deltaY));
   }
 }, { passive: false });
 
@@ -1746,9 +2034,9 @@ function drawMenu() {
   pixelText("奶龙保卫战", W / 2, 60, 44, "#ffd23f", "center");
   pixelText("Roguelike 塔防 · 建造机关，守护奶龙", W / 2, 116, 16, "#cfe8ff", "center");
   pixelText("敌人沿固定路线来袭 · 机关可阻挡 · 升级三选一战略", W / 2, 316, 13, "#8f83c0", "center");
-  drawBtn(BTN_MENU_START, "普通模式", C.btn, C.btnText, 20);
+  drawBtn(BTN_MENU_START, "常规守卫", C.btn, C.btnText, 20);
   drawBtn(BTN_MENU_NM, "噩梦守卫", "#c060ff", "#2a0e3a", 20);
-  drawBtn(BTN_MENU_LAB, "研发所", "#9fd8ff", "#0e2a4a", 20);
+  drawBtn(BTN_MENU_LAB, "研发基地", "#9fd8ff", "#0e2a4a", 20);
   drawBtn(BTN_MENU_TASK, "任务", "#7cff6b", "#0e3a1a", 20);
   pixelText("游戏集 · 第三个游戏", W / 2, 492, 12, "#6f5fa8", "center", false);
   if (!lab.pack) {                                  // 新手礼包入口（领取后消失）：金色按钮 + 礼盒图标
@@ -1803,13 +2091,13 @@ function drawLoadout() {
       if (lv > 1) pixelText(`Lv.${lv}`, r.x + r.w - 8, r.y + 10, 11, "#7cff6b", "right", false);
       pixelText(`费${eb.cost} ${eb.heal ? "治疗" : "攻"}${eb.atk} 血${eb.hp}`, r.x + 8, r.y + 40, 11, "#ffe873", "left", false);
       pixelText(`阻挡${eb.block} ${eb.heal ? "范围" : "射程"}${eb.range}`, r.x + 8, r.y + 58, 11, "#9fd8ff", "left", false);
-      if (locked) { ctx.globalAlpha = 1; pixelText("未解锁 · 抽卡获得", r.x + 8, r.y + 76, 10, "#ff9aa9", "left", false); }
+      if (locked) { ctx.globalAlpha = 1; pixelText("未解锁 · 扭蛋获得", r.x + 8, r.y + 76, 10, "#ff9aa9", "left", false); }
       else if (usedA) { ctx.globalAlpha = 1; pixelText("已在第一队上阵", r.x + 8, r.y + 76, 10, "#c060ff", "left", false); }
     }
   }
   drawBtn(BTN_LO_BACK, nmPhase ? "放弃编队" : "返回标题", "#9fd8ff", "#0e2a4a", 17);
   drawBtn(BTN_LO_GO, nmPhase === 1 ? "确定，编队第二队" : "出发！", C.btn, C.btnText, 20);
-  if (hintT > 0) pixelText(hintMsg, W / 2, 430, 14, "#ff9aa9", "center");
+  if (hintT > 0) pixelText(hintMsg, W / 2, 536, 14, "#ff9aa9", "center");
 }
 
 /* ---- 战斗场景 ---- */
@@ -1860,6 +2148,14 @@ function drawTrap(t) {
     px(x + 5, y + 5, CELL - 10, CELL - 10, t.flash > 0 ? "#ffffff" : (t.base.color || "#b8c4d0"));
     pixelText(t.base.name[0], x + CELL / 2, y + 10, 15, "#0d0a1f", "center", false);
   }
+  // 灯泡光环指示：格周暖光晕 + 四角微光（提示上下左右相邻增益范围）
+  if (t.base.buff) {
+    ctx.globalAlpha = 0.10 + Math.sin(gameT * 4) * 0.04;
+    px(x - CELL, y - CELL, CELL * 3, CELL * 3, "#ffe873");
+    ctx.globalAlpha = 1;
+    px(x - CELL, y, CELL, CELL, "rgba(255,232,115,.12)"); px(x + CELL, y, CELL, CELL, "rgba(255,232,115,.12)");
+    px(x, y - CELL, CELL, CELL, "rgba(255,232,115,.12)"); px(x, y + CELL, CELL, CELL, "rgba(255,232,115,.12)");
+  }
   // 阻挡数指示（路线上，含坚不可摧加成）
   if (trapBlockOf(t) > 0 && cellChar(t.c, t.r) === "#") {
     for (let i = 0; i < trapBlockOf(t); i++) {
@@ -1885,14 +2181,22 @@ function drawTrap(t) {
     px(x + CELL / 2 - 1, y + 7, 2, CELL - 14, "#e8fbff");
     px(x + 7, y + CELL / 2 - 1, CELL - 14, 2, "#e8fbff");
   }
+  // 灼烧指示：橙红覆盖 + 格内窜动的火苗
+  if (t.burnT > 0) {
+    ctx.globalAlpha = 0.30; px(x + 1, y + 1, CELL - 2, CELL - 2, "#ff6a2a"); ctx.globalAlpha = 1;
+    const fl = Math.floor(gameT * 10) % 2;
+    px(x + 8, y + CELL - 16 - fl * 3, 5, 8 + fl * 3, "#ff8a3f");
+    px(x + CELL - 14, y + CELL - 12 - (1 - fl) * 3, 5, 7 + (1 - fl) * 3, "#ffcf5a");
+    px(x + 10, y + CELL - 10, 3, 5, "#ffe873");
+  }
 }
 function drawEnemy(e) {
-  const s = e.elite ? 1.3 : 1;
+  const s = e.boss ? 1.8 : e.elite ? 1.3 : 1;      // 首领比精英更大一圈
   const x = e.x + e.jx, y = e.y + e.jy;
   const yUp = y - (e.flying ? AIR_LIFT : 0);
   const sp = SPR[e.base.id];
   const bodyW = sp ? 16 * sp.scale * s : 22 * s;                    // 贴图宽度（翅膀 / 血条定位用）
-  if (e.flying) {                                  // 飞行敌人：地面投影 + 扇动的翅膀
+  if (e.flying && !e.boss) {                       // 飞行敌人：地面投影 + 扇动的翅膀（首领自带翼膜，不叠加）
     ctx.globalAlpha = 0.22; px(x - 10, y + 8, 20, 5, "#000"); ctx.globalAlpha = 1;
     const flap = Math.floor(gameT * 12) % 2 ? -5 : 0;
     px(x - bodyW / 2 - 8, yUp + flap, 9, 5, "#ffffff");
@@ -1906,7 +2210,7 @@ function drawEnemy(e) {
     const squash = 1 + Math.sin(gameT * 3.2 + e.jx * 0.7) * 0.09;
     const pw = sp.scale * s / squash, ph = sp.scale * s * squash;
     const w = 16 * pw, h = 16 * ph;
-    if (!e.flying) { ctx.globalAlpha = 0.18; px(x - 14, yUp + 12, 28, 5, "#000"); ctx.globalAlpha = 1; }
+    if (!e.flying || e.boss) { ctx.globalAlpha = 0.18; px(x - 14, yUp + 12, 28, 5, "#000"); ctx.globalAlpha = 1; }
     drawSpriteXY(sp.body, x - w / 2, yUp + 16 - h, pw, ph, e.flash > 0 ? sp.wpal : sp.pal);
     topRef = yUp + 16 - h + ph;                                     // 精灵第 1 行（头顶）
   } else {
@@ -1917,11 +2221,13 @@ function drawEnemy(e) {
     px(x - 4 * s, yUp - 2 * s, 2, 2, "#161616"); px(x + 3 * s, yUp - 2 * s, 2, 2, "#161616");
     topRef = yUp - h / 2;
   }
-  if (e.elite) {                                     // 精英标记：头顶小皇冠
-    px(x - 7, topRef - 5, 14, 3, "#ffd23f");
-    px(x - 7, topRef - 8, 3, 3, "#ffd23f");
-    px(x - 1, topRef - 8, 3, 3, "#ffd23f");
-    px(x + 5, topRef - 8, 3, 3, "#ffd23f");
+  if (e.elite) {                                     // 精英标记：头顶小皇冠（首领为更大的暗金尖冠）
+    const cr = e.boss ? "#ff8a3f" : "#ffd23f", cs = e.boss ? 1.4 : 1;
+    const cw = Math.round(14 * cs), ch = Math.round(3 * cs), ct = Math.round(3 * cs);
+    px(x - cw / 2, topRef - 5 * cs, cw, ch, cr);
+    px(x - cw / 2, topRef - 5 * cs - ct, ct, ct, cr);
+    px(x - ct / 2, topRef - 5 * cs - ct - (e.boss ? 2 : 0), ct, ct, cr);
+    px(x + cw / 2 - ct, topRef - 5 * cs - ct, ct, ct, cr);
   }
   if (e.paraT > 0) {                                 // 麻痹标记：头顶闪烁的电光
     const tw = Math.floor(gameT * 8) % 2;
@@ -1937,9 +2243,9 @@ function drawEnemy(e) {
     }
   }
   // 血条
-  const bw = 28 * s, by = topRef - 12;
+  const bw = 28 * s, by = topRef - 12 - (e.boss ? 9 : 0);      // 首领皇冠更高，血条相应上移
   px(x - bw / 2, by, bw, 4, "rgba(0,0,0,.5)");
-  px(x - bw / 2, by, bw * Math.max(0, e.hp / e.maxHp), 4, e.elite ? "#ffd23f" : "#ff6b6b");
+  px(x - bw / 2, by, bw * Math.max(0, e.hp / e.maxHp), 4, e.boss ? "#ff6a8a" : e.elite ? "#ffd23f" : "#ff6b6b");
 }
 function drawFx() {
   for (const f of fx) {
@@ -2150,6 +2456,13 @@ function drawPlay() {
       W / 2, 262, 13, wm > 1 ? "#ff9aa9" : "#cfe8ff", "center", false);
     ctx.globalAlpha = 1;
   }
+  if (bossBannerT > 0) {                             // 首领来袭横幅（覆盖在波次横幅上）
+    ctx.globalAlpha = Math.min(1, bossBannerT / 0.8);
+    drawPanel(W / 2 - 260, 296, 520, 66, "#3a0f22");
+    pixelText("⚠ 首领来袭：翼龙", W / 2, 312, 22, "#ff6a8a", "center", false);
+    pixelText("飞行首领，攻击范围内多个机关并附带灼烧，小心应对", W / 2, 340, 13, "#ffc9a3", "center", false);
+    ctx.globalAlpha = 1;
+  }
   if (abortOpen) {                                   // 中止确认弹窗（战斗已暂停）
     ctx.globalAlpha = 0.72; px(0, 0, W, H, "#0d0a1f"); ctx.globalAlpha = 1;
     drawPanel(W / 2 - 230, 220, 460, 180);
@@ -2174,6 +2487,9 @@ function drawStrat() {
     wrapText(o.desc, 12).slice(0, 5).forEach((s, i) =>
       pixelText(s, r.x + r.w / 2, r.y + 118 + i * 20, 12, "#e8e2ff", "center", false));
   }
+  if (techLit("reroll"))            // 科技「运筹帷幄」：每次三选一可刷新一次战略选项
+    drawBtn(BTN_STRAT_REROLL, rerollUsed ? "已刷新（本次已用）" : "⟳ 刷新选项",
+      rerollUsed ? "#3a3355" : "#9fd8ff", rerollUsed ? "#6f5fa8" : "#0e2a4a", 15);
 }
 function drawEnd(win) {
   drawPlay();
@@ -2275,7 +2591,7 @@ function drawLabUp() {          // 养成页：机关升级卡片（内容超出
     pixelText(`生命 ${cur.hp}`, r.x + r.w / 2, ry + 158, 13, "#e8e2ff", "center", false);
     pixelText(`防御 ${cur.def}    ${atkLabel} ${cur.atk}`, r.x + r.w / 2, ry + 182, 13, "#e8e2ff", "center", false);
     if (locked) {
-      pixelText("未解锁 · 抽卡获得", r.x + r.w / 2, ry + 220, 12, "#ff9aa9", "center", false);
+      pixelText("未解锁 · 扭蛋获得", r.x + r.w / 2, ry + 220, 12, "#ff9aa9", "center", false);
     } else if (lvN < TRAP_LV_MAX) {
       const m2 = 1 + LAB_LV_STEP * lvN;                            // 下一级倍率
       pixelText(`下级：生命 ${Math.round(t.hp * m2)}  防御 ${Math.round(t.def * m2)}  ${atkLabel} ${Math.round(t.atk * m2)}`,
@@ -2396,26 +2712,29 @@ function drawGashapon() {                // 大扭蛋机
 function drawLabGacha() {       // 抽卡页：左侧大扭蛋机 + 右侧卡池说明
   if (!lab.gachaGift) {         // 首次进入抽卡界面：赠送奶石（一次性，弹窗展示）
     lab.gachaGift = true; lab.stone += GACHA_GIFT; saveLab();
-    giftPop = { title: "首次抽卡贺礼", amount: GACHA_GIFT, sub: "首次进入抽卡界面赠送奶石" };
+    giftPop = { title: "首次扭蛋贺礼", amount: GACHA_GIFT, sub: "首次进入扭蛋界面赠送奶石" };
   }
-  drawPanel(W / 2 - 280, 116, 560, 400);
+  drawPanel(W / 2 - 308, 116, 620, 400);
   pixelText("机关扭蛋", W / 2, 140, 22, "#ffd23f", "center", false);
   drawBtn(BTN_POOL, "卡池详情", "#4a3a86", "#e8e0ff", 14);
   drawGashapon();
-  pixelText(`奶石 ${lab.stone}`, W / 2 + 108, 186, 17, "#ffc7e6", "center", false);
+  pixelText(`奶石 ${lab.stone}`, W / 2 + 130, 186, 17, "#ffc7e6", "center", false);
   const info = [
     ["卡池内容：", "#ffd23f"],
-    [`· 卡池限定机关（重复→材料×${DUP_TO_MAT}） 2%`, "#cfe8ff"],
+    [`· 卡池限定机关（重复→材料×${DUP_TO_MAT}＋珍材×${DUP_TO_TREASURE}） 2%`, "#cfe8ff"],
     [`· 普通机关（重复→材料×${DUP_TO_MAT_TRAP}） 8%`, "#cfe8ff"],
     ["· 材料×1  90%", "#cfe8ff"],
     [`保底：${PITY_TRAP + 1} 抽内必出机关 · ${PITY_LTD + 1} 抽内必出限定机关`, "#9fd8ff"],
     [`当前 ${lab.pityAny} 抽未出机关 / ${lab.pityLtd} 抽未出限定`, "#8f83c0"],
-    ["材料用于「养成」页升级机关（至多 Lv.5）", "#8f83c0"]
+    [`圣眷珍材 ×${lab.treasure}（重复限定额外获得，5 个兑换一个限定时机）`, "#ffd23f"]
   ];
-  info.forEach((ln, i) => pixelText(ln[0], W / 2 - 56, 218 + i * 23, 12, ln[1], "left", false));
+  info.forEach((ln, i) => pixelText(ln[0], W / 2 - 60, 218 + i * 23, 12, ln[1], "left", false));
+  /* 三个按钮并排：圣眷之礼（左）/ 抽一次（中）/ 抽十次（右） */
   const ok1 = lab.stone >= DRAW_COST, ok10 = lab.stone >= DRAW_COST * 10;
-  drawBtn(BTN_DRAW1, "抽一次", ok1 ? C.btn : "#554a7a", ok1 ? C.btnText : "#8f83c0", 18);
-  drawBtn(BTN_DRAW10, "抽十次", ok10 ? C.btn : "#554a7a", ok10 ? C.btnText : "#8f83c0", 18);
+  drawBtn(BTN_EXCH, "圣眷之礼", lab.treasure >= TREASURE_COST ? "#ffd23f" : "#554a7a",
+    lab.treasure >= TREASURE_COST ? "#5a3a10" : "#8f83c0", 15);
+  drawBtn(BTN_DRAW1, "扭一次", ok1 ? C.btn : "#554a7a", ok1 ? C.btnText : "#8f83c0", 18);
+  drawBtn(BTN_DRAW10, "扭十次", ok10 ? C.btn : "#554a7a", ok10 ? C.btnText : "#8f83c0", 18);
   pixelText(`◈${DRAW_COST}`, BTN_DRAW1.x + BTN_DRAW1.w / 2, BTN_DRAW1.y + 66, 12, "#ffc7e6", "center", false);
   pixelText(`◈${DRAW_COST * 10}`, BTN_DRAW10.x + BTN_DRAW10.w / 2, BTN_DRAW10.y + 66, 12, "#ffc7e6", "center", false);
 }
@@ -2423,7 +2742,7 @@ function drawLabGacha() {       // 抽卡页：左侧大扭蛋机 + 右侧卡池
 /* ---- 卡池详情：全部内容物与概率（点击任意处关闭） ---- */
 function drawPool() {
   ctx.globalAlpha = 0.8; px(0, 0, W, H, "#0d0a1f"); ctx.globalAlpha = 1;
-  const pw = 760, ph = 480, x0 = (W - pw) / 2, y0 = (H - ph) / 2;
+  const pw = 880, ph = 480, x0 = (W - pw) / 2, y0 = (H - ph) / 2;   // 面板宽度按普通池 6 款机关预留
   drawPanel(x0, y0, pw, ph);
   pixelText("卡池详情", W / 2, y0 + 34, 22, "#ffd23f", "center", false);
   const fmtP = v => v.toFixed(2).replace(/\.?0+$/, "") + "%";          // 1 / 1.5 → "1%" / "1.5%"
@@ -2438,12 +2757,44 @@ function drawPool() {
       pixelText(`单款 ${fmtP(totalPct / list.length)}`, cx, iconY + 74, 11, "#9fd8ff", "center", false);
     });
   };
-  drawRow(ltd, 2, "#c9a0ff", `卡池限定机关 · 合计 2%（等概率，重复→材料×${DUP_TO_MAT}）`, y0 + 86);
+  drawRow(ltd, 2, "#c9a0ff", `卡池限定机关 · 合计 2%（等概率，重复→材料×${DUP_TO_MAT}＋圣眷珍材×${DUP_TO_TREASURE}）`, y0 + 86);
   drawRow(nml, 8, "#cfe8ff", `普通机关 · 合计 8%（等概率，重复→材料×${DUP_TO_MAT_TRAP}）`, y0 + 224);
   pixelText("材料×1 · 90%（用于「养成」页升级机关）", x0 + 30, y0 + 332, 14, "#8f83c0", "left", false);
+  pixelText(`圣眷珍材：抽到重复的限定机关额外获得，${TREASURE_COST} 个可在本页「珍材兑换」兑换任一限定机关`, x0 + 30, y0 + 410, 12, "#ffd23f", "left", false);
   pixelText(`保底：连续 ${PITY_TRAP} 次未出任何机关，下一抽必出机关；连续 ${PITY_LTD} 次未出限定机关，`, x0 + 30, y0 + 364, 12, "#9fd8ff", "left", false);
   pixelText("下一抽必出限定机关（同时触发时优先出限定）；获得限定机关时等概率抽取", x0 + 30, y0 + 384, 12, "#9fd8ff", "left", false);
   pixelText("点击任意处关闭", W / 2, y0 + ph - 24, 12, "#8f83c0", "center", false);
+}
+/* ---- 圣眷珍材兑换面板：5 个兑换任意一个卡池限定机关（点面板外关闭） ---- */
+const exchPanelRect = () => {
+  const n = ltdPool().length, pw = Math.min(W - 24, n * 260 + (n - 1) * 20 + 40);
+  return { x: (W - pw) / 2, y: (H - 400) / 2, w: pw, h: 400 };
+};
+const exchCardRects = () => {
+  const p = exchPanelRect(), n = ltdPool().length, cw = 260, gap = 20, x0 = W / 2 - (n * cw + (n - 1) * gap) / 2;
+  return ltdPool().map((t, i) => ({ t, i, x: x0 + i * (cw + gap), y: p.y + 96, w: cw, h: 250 }));
+};
+const exchBtnRect = r => ({ x: r.x + r.w / 2 - 70, y: r.y + r.h - 42, w: 140, h: 32 });
+function drawExch() {
+  ctx.globalAlpha = 0.82; px(0, 0, W, H, "#0d0a1f"); ctx.globalAlpha = 1;
+  const p = exchPanelRect();
+  drawPanel(p.x, p.y, p.w, p.h);
+  pixelText("圣眷珍材兑换", W / 2, p.y + 32, 22, "#ffd23f", "center", false);
+  pixelText(`当前圣眷珍材 ×${lab.treasure} · ${TREASURE_COST} 个可兑换一个卡池限定机关`, W / 2, p.y + 62, 13, "#c9a6ff", "center", false);
+  for (const r of exchCardRects()) {
+    const t = r.t, owned = !!lab.owned[t.id], can = lab.treasure >= TREASURE_COST;
+    drawPanel(r.x, r.y, r.w, r.h, "#221a44", "#554a7a");
+    drawEntityIcon(t.id, r.x + r.w / 2 - 32, r.y + 14, 64);
+    pixelText(t.name, r.x + r.w / 2, r.y + 88, 16, "#ffd23f", "center", false);
+    const cur = trapEffBase(t);
+    pixelText(`攻击 ${cur.atk} · 生命 ${cur.hp}`, r.x + r.w / 2, r.y + 116, 12, "#e8e2ff", "center", false);
+    pixelText(`费用 ${t.cost} · 阻挡 ${t.block} · ${t.range > 0 ? "射程 " + t.range : "近战"}`, r.x + r.w / 2, r.y + 138, 12, "#e8e2ff", "center", false);
+    pixelText(owned ? `已拥有 · 兑换转材料×${DUP_TO_MAT}＋珍材×${DUP_TO_TREASURE}` : "未拥有",
+      r.x + r.w / 2, r.y + 164, 11, owned ? "#8f83c0" : "#7cff6b", "center", false);
+    const b = exchBtnRect(r);
+    drawBtn(b, `兑换 ×${TREASURE_COST}`, can ? "#ffd23f" : "#3a3355", can ? "#5a3a10" : "#6f5fa8", 14);
+  }
+  pixelText("点击面板外关闭", W / 2, p.y + p.h - 22, 12, "#8f83c0", "center", false);
 }
 function drawGachaResult() {    // 抽卡结果展示（点击任意处关闭）
   ctx.globalAlpha = 0.78; px(0, 0, W, H, "#0d0a1f"); ctx.globalAlpha = 1;
@@ -2452,7 +2803,7 @@ function drawGachaResult() {    // 抽卡结果展示（点击任意处关闭）
   const pw = cols * cw + (cols - 1) * gap + 80, ph = rows * ch + (rows - 1) * gap + 130;
   const x0 = (W - pw) / 2, y0 = (H - ph) / 2;
   drawPanel(x0, y0, pw, ph);
-  pixelText("抽卡结果", W / 2, y0 + 20, 20, "#ffd23f", "center", false);
+  pixelText("扭蛋结果", W / 2, y0 + 20, 20, "#ffd23f", "center", false);
   items.forEach((it, i) => {
     const r = (i / cols) | 0, c = i % cols;
     const x = x0 + 40 + c * (cw + gap), y = y0 + 64 + r * (ch + gap);
@@ -2463,6 +2814,7 @@ function drawGachaResult() {    // 抽卡结果展示（点击任意处关闭）
       pixelText(t ? t.name : it.id, x + cw / 2, y + 70, 14, "#ffd23f", "center", false);
       pixelText(it.dup ? `重复 → 材料×${it.conv}` : "NEW！新机关", x + cw / 2, y + 96, 11,
         it.dup ? "#8f83c0" : "#7cff6b", "center", false);
+      if (it.treas) pixelText(`＋圣眷珍材×${it.treas}`, x + cw / 2, y + 114, 11, "#ffd23f", "center", false);
     } else {
       px(x + cw / 2 - 18, y + 20, 36, 36, "#c98a1e"); px(x + cw / 2 - 12, y + 26, 24, 24, "#ffe873");
       pixelText("材料", x + cw / 2, y + 70, 14, "#ffe873", "center", false);
@@ -2474,11 +2826,11 @@ function drawGachaResult() {    // 抽卡结果展示（点击任意处关闭）
 function drawLab() {
   px(0, 0, W, H, "#171130");
   drawTopBtn(BTN_LAB_BACK);
-  pixelText("研发所", W / 2, 14, 26, "#ffd23f", "center");
+  pixelText("研发基地", W / 2, 14, 26, "#ffd23f", "center");
   drawLabCurrency();
-  drawBtn(BTN_TAB_UP, "养成", labTab === "up" ? C.btn : "#554a7a", labTab === "up" ? C.btnText : "#e8e2ff", 17);
-  drawBtn(BTN_TAB_GA, "抽卡", labTab === "gacha" ? C.btn : "#554a7a", labTab === "gacha" ? C.btnText : "#e8e2ff", 17);
-  drawBtn(BTN_TAB_TECH, "科技树", labTab === "tech" ? C.btn : "#554a7a", labTab === "tech" ? C.btnText : "#e8e2ff", 17);
+  drawBtn(BTN_TAB_UP, "机关强化", labTab === "up" ? C.btn : "#554a7a", labTab === "up" ? C.btnText : "#e8e2ff", 17);
+  drawBtn(BTN_TAB_GA, "机关扭蛋", labTab === "gacha" ? C.btn : "#554a7a", labTab === "gacha" ? C.btnText : "#e8e2ff", 17);
+  drawBtn(BTN_TAB_TECH, "研发进度", labTab === "tech" ? C.btn : "#554a7a", labTab === "tech" ? C.btnText : "#e8e2ff", 17);
   if (labTab === "up") drawLabUp(); else if (labTab === "tech") drawLabTech(); else drawLabGacha();
   if (hintT > 0) pixelText(hintMsg, W / 2, H - 30, 14, "#ff9aa9", "center");
   if (labResult) drawGachaResult();
@@ -2502,14 +2854,15 @@ function render() {
   ctx.restore();                                           // 结束屏幕震动偏移（UI 弹窗不参与震动）
   if (packOpen) drawPack();                  // 新手礼包面板（赠送弹窗之下、其他界面之上）
   if (poolOpen) drawPool();                  // 卡池详情面板
+  if (exchOpen) drawExch();                  // 圣眷珍材兑换面板
   if (giftPop) drawGiftPop();              // 赠送弹窗覆盖在最上层
 }
 /* ---- 科技树页：节点图（绘制与点击共用 techRect） ---- */
-const TECH_NODE_W = 168, TECH_NODE_H = 86;
+const TECH_NODE_W = 168, TECH_NODE_H = 80;
 const techRect = n => ({ x: n.x - TECH_NODE_W / 2, y: n.y - TECH_NODE_H / 2, w: TECH_NODE_W, h: TECH_NODE_H });
+const BTN_TECH_EXCHANGE = { x: W - 286, y: 602, w: 270, h: 34 };   // 全部点亮后：灵感兑换奶石（右下角）
 function drawLabTech() {            // 科技树页：并入研发所作为第三个标签页（内容区，不含标题与返回）
-  pixelText(`灵感 ×${lab.inspire}`, W / 2, 110, 16, "#c9a6ff", "center");
-  pixelText("点击节点点亮 / 熄灭（点亮需先点亮前置节点，熄灭返还灵感）", W / 2, 132, 12, "#8f83c0", "center", false);
+  pixelText(`灵感 ×${lab.inspire}`, W / 2, 104, 16, "#c9a6ff", "center");
   /* 连线：前置节点 → 子节点（已点亮连线高亮） */
   for (const n of TECH_NODES) {
     if (!n.req) continue;
@@ -2522,34 +2875,68 @@ function drawLabTech() {            // 科技树页：并入研发所作为第�
     const r = techRect(n), lit = techLit(n.id), avail = !lit && (!n.req || techLit(n.req));
     const bg = lit ? (n.key ? "#7a5a10" : "#14520e") : avail ? "#2a2450" : "#1c1836";
     drawPanel(r.x, r.y, r.w, r.h, bg, lit ? (n.key ? "#ffd23f" : "#7cff6b") : "#554a7a");
-    if (n.key) pixelText("★ 关键", r.x + r.w / 2, r.y + 6, 10, lit ? "#ffd23f" : "#8f83c0", "center", false);
-    pixelText(n.name, r.x + r.w / 2, r.y + (n.key ? 22 : 12), 15, lit ? "#fff" : "#bdb2e8", "center", false);
-    pixelText(n.desc, r.x + r.w / 2, r.y + (n.key ? 44 : 36), 10, lit ? "#dfffd0" : "#8f83c0", "center", false);
+    if (n.key) pixelText("★ 关键", r.x + r.w / 2, r.y + 4, 10, lit ? "#ffd23f" : "#8f83c0", "center", false);
+    pixelText(n.name, r.x + r.w / 2, r.y + (n.key ? 19 : 10), 15, lit ? "#fff" : "#bdb2e8", "center", false);
+    pixelText(n.desc, r.x + r.w / 2, r.y + (n.key ? 40 : 33), 10, lit ? "#dfffd0" : "#8f83c0", "center", false);
     pixelText(lit ? "已点亮（点击熄灭）" : `灵感 ×${techCost(n)}`,
-      r.x + r.w / 2, r.y + r.h - 22, 11, lit ? "#7cff6b" : lab.inspire >= techCost(n) ? "#ffd23f" : "#ff6b6b", "center", false);
+      r.x + r.w / 2, r.y + r.h - 21, 11, lit ? "#7cff6b" : lab.inspire >= techCost(n) ? "#ffd23f" : "#ff6b6b", "center", false);
+  }
+  pixelText("点击节点点亮 / 熄灭（点亮需先点亮前置节点，熄灭返还灵感）", W / 2, 622, 12, "#8f83c0", "center", false);
+  if (techAllLit()) {              // 全部点亮后：多余灵感可兑换奶石
+    const can = lab.inspire >= 1;
+    drawBtn(BTN_TECH_EXCHANGE, `灵感 ×1 → 奶石 ×${TECH_EXCHANGE_STONE}`,
+      can ? "#ffc7e6" : "#3a3355", can ? "#5a1a3a" : "#6f5fa8", 14);
   }
 }
-/* ---- 任务页：每日任务（领取制） + 新手任务 ---- */
-function drawTaskRow(rw, i) {
-  const r = taskRowRect(i);
+/* ---- 任务页：每日任务 / 活动任务 / 新手任务（已领取自动移除，活动限时 14 天 ---- */
+function drawTaskRow(rw, r) {
   drawPanel(r.x, r.y, r.w, r.h);
   pixelText(rw.name, r.x + 16, r.y + 7, 14, "#fff", "left", false);
-  pixelText(`进度 ${rw.prog}/${rw.need}`, r.x + 16, r.y + 29, 11, "#8f83c0", "left", false);
-  pixelText(`奶石×${rw.reward}`, r.x + r.w - 140, r.y + 18, 12, "#ffc7e6", "right", false);
-  drawBtn(taskBtnRect(r), rw.st === 2 ? "已领取" : rw.st === 1 ? "领取" : "未达成",
-    rw.st === 2 ? "#3a3355" : rw.st === 1 ? C.btn : "#554a7a",
-    rw.st === 2 ? "#6f5fa8" : rw.st === 1 ? C.btnText : "#8f83c0", 15);
+  pixelText(`进度 ${rw.prog}/${rw.need}`, r.x + 16, r.y + 27, 11, "#8f83c0", "left", false);
+  /* 奖励：放在按钮左侧，不与按钮重叠（按钮宽 112，左侧留 120 给奖励） */
+  const rewardX = r.x + r.w - 248;
+  if (rw.reward.type === "trap") {
+    const t = TRAPS.find(x => x.id === rw.reward.id);
+    drawEntityIcon(rw.reward.id, rewardX, r.y + 12, 24);
+    pixelText(t ? t.name : "机关", rewardX + 30, r.y + 17, 12, "#ffd23f", "left", false);
+  } else {
+    pixelText(`奶石×${rw.reward.n}`, rewardX + 30, r.y + 17, 12, "#ffc7e6", "left", false);
+  }
+  const isDone = rw.st === 2;
+  drawBtn(taskBtnRect(r), isDone ? "已领取" : rw.st === 1 ? "领取" : "未达成",
+    isDone ? "#3a3355" : rw.st === 1 ? C.btn : "#554a7a",
+    isDone ? "#6f5fa8" : rw.st === 1 ? C.btnText : "#8f83c0", 14);
 }
 function drawTask() {
+  evInit();
   px(0, 0, W, H, "#171130");
   drawTopBtn(BTN_LAB_BACK);
   pixelText("任务", W / 2, 14, 26, "#ffd23f", "center");
   drawLabCurrency();
-  const rows = taskRows();
-  pixelText("每日任务（每日刷新，可重复领取）", W / 2 - 360, 70, 14, "#9fd8ff", "left", false);
-  drawTaskRow(rows[0], 0);
-  pixelText("新手任务（仅可领取一次）", W / 2 - 360, 164, 14, "#9fd8ff", "left", false);
-  for (let i = 1; i < rows.length; i++) drawTaskRow(rows[i], i);
+  taskScroll = Math.max(0, Math.min(taskMaxScroll(), taskScroll));
+  const { rows, rects, titles } = taskRowRects();
+  /* 内容区裁剪 + 滚动 */
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, TASK_VIEW_Y, W, H - TASK_VIEW_Y - 10); ctx.clip();
+  ctx.translate(0, -taskScroll);
+  for (const t of titles) {
+    const kind = rows[t.i].kind;
+    let title, color = "#9fd8ff";
+    if (kind === "daily") title = "每日任务（每日刷新，可重复领取）";
+    else if (kind === "event") {
+      const left = evActive() ? EV_DAY_LEFT() : 0;
+      title = `活动任务（限时 ${EV_DAYS} 天，剩余 ${left} 天）`; color = "#ffd23f";
+    } else title = "新手任务（仅可领取一次）";
+    pixelText(title, W / 2 - 360, t.y + 5, 15, color, "left", false);
+  }
+  for (let i = 0; i < rects.length; i++) drawTaskRow(rects[i].row, rects[i]);
+  ctx.restore();
+  /* 滚动条 */
+  const ms = taskMaxScroll();
+  if (ms > 0) {
+    const vh = H - TASK_VIEW_Y - 10, sh = Math.max(40, vh * vh / (vh + ms));
+    px(W - 8, TASK_VIEW_Y + (vh - sh) * taskScroll / ms, 5, sh, "rgba(255,255,255,.35)");
+  }
   if (hintT > 0) pixelText(hintMsg, W / 2, H - 10, 14, "#ff9aa9", "center");
 }
 function drawGiftPop() {        // 首次赠送奶石弹窗（点击任意处收下）
@@ -2569,8 +2956,9 @@ function drawGiftPop() {        // 首次赠送奶石弹窗（点击任意处收
 /* ---- 新手礼包面板：任选一款卡池限定机关 ---- */
 function drawPack() {
   ctx.globalAlpha = 0.78; px(0, 0, W, H, "#0d0a1f"); ctx.globalAlpha = 1;
-  drawPanel(PACK_PANEL.x, PACK_PANEL.y, PACK_PANEL.w, PACK_PANEL.h);
-  const y0 = PACK_PANEL.y;
+  const pw = packPanelW();
+  drawPanel((W - pw) / 2, PACK_PANEL_Y, pw, 380);
+  const y0 = PACK_PANEL_Y;
   pixelText("新手礼包", W / 2, y0 + 40, 26, "#ffd23f", "center", true);
   pixelText("任选一款卡池限定机关，领取后本礼包入口消失", W / 2, y0 + 72, 13, "#8f83c0", "center", false);
   for (const r of packCardRects()) {
