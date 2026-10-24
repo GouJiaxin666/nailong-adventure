@@ -142,6 +142,16 @@ function wrapText(str, maxChars) {           // 简单按字数折行（中文�
   for (let i = 0; i < str.length; i += maxChars) out.push(str.slice(i, i + maxChars));
   return out;
 }
+function wrapTextW(str, maxW, size) {        // 按渲染宽度贪婪折行（科技节点描述用，中英文混排）
+  ctx.font = `bold ${size}px "Courier New", monospace`;
+  const lines = []; let cur = "";
+  for (const ch of str) {
+    if (cur && ctx.measureText(cur + ch).width > maxW) { lines.push(cur); cur = ch; }
+    else cur += ch;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
 
 /* ================= 实体像素精灵（机关 / 敌人） =================
    与角色同规格：16×16 字符矩阵 + 调色板。
@@ -716,7 +726,7 @@ const ENEMIES = [
   },
   {
     id: "ptero", name: "翼龙", tier: "boss", flying: true,
-    hp: 20000, def: 300, atk: 450, interval: 2, speed: 0.5,
+    hp: 18000, def: 300, atk: 450, interval: 2, speed: 0.5,
     atkRange: 3, maxTargets: 4, burn: true,     // 远程：对周围 3 格内至多 4 个机关造成伤害并施加灼烧
     exp: 200, color: "#a06fd8",
     desc: "飞行敌人。攻击对周围 3 格内至多 4 个机关造成伤害，并施加持续 5 秒的灼烧（每秒 125 点真实伤害）；对处于灼烧状态的机关造成的伤害 +80%。"
@@ -787,7 +797,7 @@ function startBGM() {
    apply(mods)：直接修改全局增益对象；onPick()：选择时一次性生效（可选）。
    mods = { atkAll:全局攻击加成(加算), dmgUp:伤害提升, healUp:受治疗加成,
             coinRate:额外币/s, trapHp:机关生命倍率, enemySpeed:敌移速倍率,
-            trapMods:{ 机关id:{atk,block,def,...} } }
+            hurtDown:机关受伤减免(加算), expUp:守卫经验获取加成, trapMods:{ 机关id:{atk,block,def,...} } }
    数值规则（用户定）：局内攻击力加成互相加算、与局外养成（升级）乘算 ——
      最终攻击力 = 局外攻击力 × (1 + Σ局内攻击加成)，如局外600、局内+30%与+15% → 600×1.45；
      伤害提升作用于被防御减免后的伤害（乘算）。 */
@@ -816,7 +826,15 @@ const STRATEGIES = [
     desc: "弓箭攻击间隔 -0.5 秒，蓄力叠加层数上限 +1（最多 3 层）。",
     apply: m => { const tm = m.trapMods.bow = m.trapMods.bow || {}; tm.intervalFlat = (tm.intervalFlat || 0) - 0.5; } },
   { id: "adapt",   name: "随机应变", scope: "global",
-    desc: "机关生命高于 50% 时攻击力 +20%；生命不高于 50% 时防御力 +20%。", apply: () => {} }
+    desc: "机关生命高于 50% 时攻击力 +20%；生命不高于 50% 时防御力 +20%。", apply: () => {} },
+  { id: "united",  name: "众志成城", scope: "global",
+    desc: "场上每有一个机关，所有机关造成的伤害 +2.4%。", apply: () => {} },        // 见 trapDmgOf（按存活机关数动态计算）
+  { id: "unstoppable", name: "万夫莫开", scope: "global",
+    desc: "场上每有一名敌人，所有敌人的防御力 -4.8%。", apply: () => {} },          // 见 enemyDefOf（按存活敌数动态计算）
+  { id: "tread",   name: "行履",     scope: "trap", trap: "boots",
+    desc: "场上存在靴子时，每秒额外获得 3 个奶龙币。", apply: () => {} },            // 见 update 产币行
+  { id: "bramble", name: "荆棘丛生", scope: "trap", trap: "thorns",
+    desc: "荆棘的持续真实伤害 +100 点；敌人离开荆棘所在格后仍会受到真实伤害，持续 4 秒。", apply: () => {} }   // 见 update 荆棘光环
 ];
 
 /* ================= 研发系统（养成 / 抽卡，局外成长） =================
@@ -1140,8 +1158,8 @@ function claimRookie(def) {
 /* 噩梦守卫：里程碑领奖（顺序领取，第 i 档需历史最佳总波次 ≥ (i+1)×10 波） */
 function claimNm(i) {
   if (i !== lab.nmClaim || lab.nmBest < (i + 1) * 10) return;
-  lab.nmClaim++; lab.stone += NM_REWARD; saveLab();
-  giftPop = { title: "噩梦守卫里程碑", amount: NM_REWARD, sub: `历史最佳总计通过 ${(i + 1) * 10} 波` };
+  lab.nmClaim++; lab.stone += NM_REWARD; lab.mat += NM_REWARD_MAT; saveLab();   // 每档：奶石×200 + 材料×2
+  giftPop = { title: "噩梦守卫里程碑", amount: NM_REWARD, mat: NM_REWARD_MAT, sub: `历史最佳总计通过 ${(i + 1) * 10} 波` };
 }
 
 /* ================= 游戏状态 ================= */
@@ -1149,8 +1167,8 @@ const ST = { MENU: 0, LOADOUT: 1, PLAY: 2, STRAT: 3, WIN: 4, LOSE: 5, LAB: 6, TA
 let state = ST.MENU;
 
 /* ---- 噩梦守卫：编两队（各至多 6 机关、同一机关不重复上阵）先后打两局不同地图，每局 30 波共 60 波；
-   敌人生命 ×200%、攻击 ×150%；奖励按历史最佳总波次的里程碑在专门界面领取（每 10 波一档 200 奶石，共 6 档） ---- */
-const NM_WAVES = 30, NM_HP_MUL = 2, NM_ATK_MUL = 1.5, NM_REWARD = 200, NM_MAX_TIERS = 6;
+   敌人生命 ×200%、攻击 ×150%；奖励按历史最佳总波次的里程碑在专门界面领取（每 10 波一档：奶石×200 + 材料×2，共 6 档） ---- */
+const NM_WAVES = 30, NM_HP_MUL = 2, NM_ATK_MUL = 1.5, NM_REWARD = 200, NM_REWARD_MAT = 2, NM_MAX_TIERS = 6;   // 每档奖励：奶石×200 + 材料×2
 let nmRun = null;                     // 进行中的噩梦挑战 { teamA, teamB, mapA, mapB, phase, waves1, waves2, newBest }
 let nmPhase = 0;                      // 编队阶段：0 非噩梦 / 1 编第一队 / 2 编第二队
 const maxWaveNow = () => nmRun ? NM_WAVES : WAVE_CFG.maxWave;   // 噩梦守卫：每局 30 波（普通模式无尽）
@@ -1173,6 +1191,7 @@ let labTab = "up", labResult = null;      // 研发所：当前页签（up 养�
 let gachaAnim = null;                     // 扭蛋机动画 {t, items}（摇柄→出蛋→爆开，结束后才展示结果，点击任意处跳过）
 let labUpScroll = 0, labDragY = null;     // 养成页：滚动偏移 / 触屏拖动的画布 y 坐标
 let taskScroll = 0;                        // 任务页：滚动偏移
+let techScroll = 0;                        // 研发进度页：滚动偏移
 let hintMsg = "", hintT = 0;
 let mouse = { x: -99, y: -99 };
 let menuT = 0;
@@ -1229,20 +1248,24 @@ const INSPIRE_PER_BATTLE = 2;          // 单场≥10波获得的灵感
 const WEEK_INSPIRE_MAX = 20;           // 灵感周上限
 const TECH_EXCHANGE_STONE = 10;        // 全部点亮后：1 灵感兑换的奶石数
 const TECH_NODES = [
-  // x/y 为节点中心坐标（科技树页绘制/点击共用，3 列 × 5 行）；req 为前置节点 id；关键节点与普通节点交替穿插
+  // x/y 为节点中心坐标（科技树页绘制/点击共用，3 列 × 6 行）；req 为前置节点 id；关键节点与普通节点交替穿插
   { id: "atk1",  name: "攻击强化 I",   key: false, x: 230, y: 165, req: null,   desc: "所有机关攻击力 +5%", apply: m => { m.atkAll += 0.05; } },
   { id: "atk2",  name: "攻击强化 II",  key: false, x: 230, y: 263, req: "atk1", desc: "所有机关攻击力 +5%", apply: m => { m.atkAll += 0.05; } },
   { id: "atk3",  name: "攻击强化 III", key: false, x: 230, y: 361, req: "atk2", desc: "所有机关攻击力 +5%", apply: m => { m.atkAll += 0.05; } },
   { id: "spd1",  name: "迅捷",         key: false, x: 230, y: 459, req: "atk3", desc: "所有机关攻击速度 +3%", apply: m => { m.atkSpd += 0.03; } },
+  { id: "spd2",  name: "迅捷 II",      key: false, x: 230, y: 557, req: "spd1", desc: "所有机关攻击速度 +3%", apply: m => { m.atkSpd += 0.03; } },
+  { id: "first", name: "先声夺人",     key: true,  x: 230, y: 655, req: "spd2", desc: "每个敌人首次受到机关伤害时，该机关此次攻击力 +100%" },   // 见 firstHitExtra
   { id: "def1",  name: "防御强化",     key: false, x: 576, y: 165, req: null,   desc: "所有机关防御力 +5%", apply: m => { m.defAll += 0.05; } },
   { id: "coin",  name: "战备资金",     key: true,  x: 576, y: 263, req: "def1", desc: "战斗开始时奶龙币 +50" },
   { id: "def2",  name: "防御强化 II",  key: false, x: 576, y: 361, req: "coin", desc: "所有机关防御力 +5%", apply: m => { m.defAll += 0.05; } },
   { id: "wisdom", name: "经验储备",    key: true,  x: 576, y: 459, req: "def2", desc: "战斗开始时立即获得 50 守卫经验" },
+  { id: "tough", name: "坚韧",         key: false, x: 576, y: 557, req: "wisdom", desc: "所有机关受到的伤害 -3%", apply: m => { m.hurtDown += 0.03; } },
   { id: "hp1",   name: "生命强化 I",   key: false, x: 922, y: 165, req: null,    desc: "所有机关生命值 +5%", apply: m => { m.trapHp *= 1.05; } },
   { id: "strat", name: "先发制人",     key: true,  x: 922, y: 263, req: "hp1",   desc: "战斗开始时立即选择一个战略" },
   { id: "hp2",   name: "生命强化 II",  key: false, x: 922, y: 361, req: "strat", desc: "所有机关生命值 +5%", apply: m => { m.trapHp *= 1.05; } },
   { id: "reroll", name: "运筹帷幄",    key: true,  x: 922, y: 459, req: "hp2",   desc: "选择战略时可刷新一次选项（每次选择限一次）" },
-  { id: "hp3",   name: "生命强化 III", key: false, x: 922, y: 557, req: "reroll", desc: "所有机关生命值 +5%", apply: m => { m.trapHp *= 1.05; } }
+  { id: "hp3",   name: "生命强化 III", key: false, x: 922, y: 557, req: "reroll", desc: "所有机关生命值 +5%", apply: m => { m.trapHp *= 1.05; } },
+  { id: "study", name: "研学",         key: false, x: 922, y: 655, req: "hp3",   desc: "守卫经验获取效率 +10%", apply: m => { m.expUp += 0.1; } }
 ];
 const techNode = id => TECH_NODES.find(n => n.id === id);
 const techLit  = id => !!lab.tech[id];
@@ -1276,7 +1299,7 @@ function techExchange() {
 /* ================= 战略系统 ================= */
 function recomputeMods() {
   const ratios = traps.map(t => t.hpMax ? t.hp / t.hpMax : 1);
-  mods = { atkAll: 0, defAll: 0, dmgUp: 0, healUp: 0, coinRate: 0, trapHp: 1, enemySpeed: 1, enemyAtkSpd: 1, atkSpd: 0, trapMods: {} };
+  mods = { atkAll: 0, defAll: 0, dmgUp: 0, healUp: 0, coinRate: 0, trapHp: 1, enemySpeed: 1, enemyAtkSpd: 1, atkSpd: 0, hurtDown: 0, expUp: 0, trapMods: {} };
   for (const id of chosen) { const s = STRATEGIES.find(x => x.id === id); if (s) s.apply(mods); }
   for (const n of TECH_NODES) if (techLit(n.id) && n.apply) n.apply(mods);   // 科技树加成：与战略同乘区（攻%/防%加算、生命%乘算），作用于所有模式
   traps.forEach((t, i) => {
@@ -1292,7 +1315,7 @@ function drawStratOptions() {
 }
 function gainExp(n) {
   if (lv >= LV_MAX) return;
-  exp += n;
+  exp += Math.round(n * (1 + (mods.expUp || 0)));   // 科技「研学」：守卫经验获取效率 +10%
   while (lv < LV_MAX && exp >= expNeed()) {
     exp -= expNeed(); lv++; pendingStrats++;
     if (lv > lab.rookie.bestLv) lab.rookie.bestLv = lv;   // rookie.bestLv：新手任务（守卫达10级一次）
@@ -1349,7 +1372,17 @@ function trapHpMaxOf(base) { const tm = mods.trapMods[base.id] || {}; return Mat
 /* 伤害提升（取势等普通伤害提升）作用于被防御减免后的伤害；
    守卫等级独立伤害提升为另一乘区，与普通伤害提升互相乘算：lv.1 无提升，lv.2 +10%，lv.3 +20%，以此类推 */
 function lvDmgMul() { return 1 + Math.max(0, lv - 1) * 0.1; }
-function trapDmgOf(t, def, extra = 0) { return Math.round(calcDmg(trapAtkOf(t, extra), def) * (1 + mods.dmgUp) * lvDmgMul()); }
+/* 战略「众志成城」：场上每有一个存活机关，所有机关造成的伤害 +2.4%（动态计算，与 dmgUp 同乘区加算） */
+const unitedBonus = () => chosen.includes("united") ? traps.reduce((n, x) => n + (x.dead ? 0 : 1), 0) * UNITED_DMG : 0;
+/* 战略「万夫莫开」：场上每有一名存活敌人，所有敌人防御力 -4.8%（动态计算，至多降至 0） */
+function enemyDefOf(e) {
+  if (!chosen.includes("unstoppable")) return e.def;
+  const n = enemies.reduce((k, x) => k + (x.dead ? 0 : 1), 0);
+  return Math.round(e.def * Math.max(0, 1 - FOE_DEF_DOWN * n));
+}
+/* 科技「先声夺人」：每个敌人首次受到机关伤害时，该机关此次攻击力 +100% */
+const firstHitExtra = e => techLit("first") && !e.firstHit ? FIRST_HIT_BONUS : 0;
+function trapDmgOf(t, def, extra = 0) { return Math.round(calcDmg(trapAtkOf(t, extra), def) * (1 + mods.dmgUp + unitedBonus()) * lvDmgMul()); }
 function trapIntervalOf(t) { const tm = mods.trapMods[t.base.id] || {}; return Math.max(0.2, (t.base.interval * (tm.interval || 1) + (tm.intervalFlat || 0)) / (1 + (mods.atkSpd || 0))); }   // intervalFlat：固定减少（百步穿杨 -0.5 秒）；atkSpd：科技「迅捷」攻击速度 +3%（攻击间隔 ÷1.03）
 function buildAt(c, r) {
   const lt = loadout[selTrap];
@@ -1365,7 +1398,8 @@ function buildAt(c, r) {
     for (const e of enemies) {
       if (e.dead) continue;
       if (Math.hypot(e.x - bx, e.y - by) <= BOMB_RANGE * CELL) {
-        hurtEnemy(e, trapDmgOf(bt, e.def));
+        hurtEnemy(e, trapDmgOf(bt, enemyDefOf(e), firstHitExtra(e)));   // 炸弹：也触发万夫莫开/先声夺人
+        e.firstHit = true;
         if (!e.dead && chosen.includes("art"))          // 爆炸就是艺术：命中敌人晕眩 2 秒（晕眩抗性按百分比缩短）
           e.stunT = Math.max(e.stunT, STUN_TIME * (1 - resOf(e.base, "stun")));
       }
@@ -1405,6 +1439,11 @@ const PARA_TIME = 0.8;                       // 麻痹时长（秒）：无法�
 const FREEZE_TIME = 1;                       // 冻结时长（秒）：机关无法行动（攻击/治疗/冷却暂停，阻挡仍有效）
 const BOOT_BONUS_TIME = 5, BOOT_COIN_RATE = 100;   // 靴子技能：首建后 5 秒内每秒 +100 奶龙币（共 500）
 const THORN_SLOW = 0.85, THORN_DPS = 150;          // 荆棘光环：所在格敌人移速 -85% + 每秒 150 真实伤害
+const THORN_DPS_BONUS = 100, THORN_LINGER = 4;     // 战略「荆棘丛生」：荆棘真伤 +100/秒，敌人离格后余毒持续 4 秒
+const TREAD_COIN_RATE = 3;                         // 战略「行履」：场上有靴子时每秒额外产币
+const UNITED_DMG = 0.024;                          // 战略「众志成城」：每个存活机关 +2.4% 伤害
+const FOE_DEF_DOWN = 0.048;                        // 战略「万夫莫开」：每名存活敌人使敌防御 -4.8%
+const FIRST_HIT_BONUS = 1.0;                       // 科技「先声夺人」：敌人首次受击时此次攻击力 +100%
 const ENERGIZE_TIME = 5, ENERGIZE_ATK = 250;       // 精力充沛：受注射剂治疗后的攻击 buff 时长与数值
 const BIRD_ATK_PAUSE = 0.5;                        // 飞鸟攻击时的定身时长（秒）
 const SWEEP_RANGE = 1.3;                            // 武士挥砍：前方半圆的半径（格）
@@ -1461,6 +1500,7 @@ function spawnEnemy(q) {
     hp, maxHp: hp, atk: Math.round(b.atk * q.mul * (nmRun ? NM_ATK_MUL : 1)), def: Math.round(b.def * q.mul), interval: b.interval,   // 噩梦守卫：敌人攻击 ×150%
     flying: !!b.flying, elite: b.tier !== "normal", boss: b.tier === "boss",   // 首领与精英共用精英标记（金框/皇冠），首领额外放大
     cd: 0, blockedBy: null, dead: false, flash: 0, paraT: 0, stunT: 0,
+    thornT: 0, firstHit: false,                          // thornT：荆棘丛生离格余毒计时；firstHit：先声夺人（首次受击 +150%）
     jx: Math.random() * 12 - 6, jy: Math.random() * 8 - 4
   });
 }
@@ -1472,16 +1512,16 @@ function trapDie(t) {
   t.blocked.length = 0;
   fx.push({ type: "burst", x: t.x, y: t.y, ttl: 0.4, color: "#b8c4d0" });
 }
-/* 敌人对机关造成伤害的统一出口（按机关防御结算） */
+/* 敌人对机关造成伤害的统一出口（按机关防御结算；科技「坚韧」受到伤害 -3%） */
 function hurtTrap(t, atk) {
-  t.hp -= calcDmg(atk, trapDefOf(t));
+  t.hp -= Math.round(calcDmg(atk, trapDefOf(t)) * (1 - (mods.hurtDown || 0)));
   t.flash = 0.12;
   if (t.hp > 0) return;
   trapDie(t);
 }
-/* 真实伤害（无视防御）：灼烧等持续伤害专用，不刷新白闪 */
+/* 真实伤害（无视防御）：灼烧等持续伤害专用，不刷新白闪；科技「坚韧」的受伤减免同样生效 */
 function hurtTrapTrue(t, dmg) {
-  t.hp -= dmg;
+  t.hp -= dmg * (1 - (mods.hurtDown || 0));
   if (t.hp <= 0 && !t.dead) trapDie(t);
 }
 function hurtEnemy(e, dmg, quiet) {
@@ -1497,7 +1537,8 @@ function hurtEnemy(e, dmg, quiet) {
 }
 function update(dt) {
   gameT += dt;
-  coins = Math.min(COIN_MAX, coins + (COIN_RATE + mods.coinRate) * dt);
+  coins = Math.min(COIN_MAX, coins + (COIN_RATE + mods.coinRate +
+    (chosen.includes("tread") && traps.some(t => !t.dead && t.base.id === "boots") ? TREAD_COIN_RATE : 0)) * dt);   // 战略「行履」：场上有靴子时每秒 +3 奶龙币
   if (hintT > 0) hintT -= dt;
   if (shakeT > 0) shakeT -= dt;
   if (waveBannerT > 0) waveBannerT -= dt;
@@ -1512,13 +1553,23 @@ function update(dt) {
   /* ---- 荆棘光环格集合（存活荆棘所在格；真实伤害与减速均不吃任何加成/减免） ---- */
   const thornCells = new Set();
   for (const t of traps) if (!t.dead && t.base.thorns) thornCells.add(t.c + "," + t.r);
+  const brambleOn = chosen.includes("bramble");                       // 战略「荆棘丛生」
+  const thornDps = THORN_DPS + (brambleOn ? THORN_DPS_BONUS : 0);     // 荆棘丛生：真伤 150 → 250/秒
 
   /* ---- 敌人：移动 / 攻击机关 ---- */
   for (const e of enemies) {
     if (e.dead) continue;
     if (e.flash > 0) e.flash -= dt;
     const onThorn = !e.flying && thornCells.has(Math.floor((e.x - GRID_OX) / CELL) + "," + Math.floor((e.y - GRID_OY) / CELL));   // 地面荆棘不影响飞行敌人
-    if (onThorn) { hurtEnemy(e, THORN_DPS * dt, true); if (e.dead) continue; }   // 荆棘：每秒 150 真实伤害（quiet 不刷屏白闪）
+    if (onThorn) {
+      hurtEnemy(e, thornDps * dt, true);                              // 荆棘：每秒 150 真实伤害（quiet 不刷屏白闪）
+      if (brambleOn) e.thornT = THORN_LINGER;                         // 荆棘丛生：在格期间刷新余毒计时（离格后仍受 4 秒真伤）
+      if (e.dead) continue;
+    } else if (e.thornT > 0) {                                        // 荆棘丛生：离格余毒，按剩余时间比例结算
+      const dtl = Math.min(dt, e.thornT); e.thornT -= dtl;
+      hurtEnemy(e, thornDps * dtl, true);
+      if (e.dead) continue;
+    }
     if (e.blockedBy) {
       if (e.blockedBy.dead) { e.blockedBy = null; }
       else if (e.stunT <= 0 && !e.base.atkRange) {    // 远程敌人被阻挡时改用远程攻击，不走近战（避免同一回合双重攻击）
@@ -1645,7 +1696,8 @@ function update(dt) {
         for (const e of enemies) {
           if (e.dead) continue;
           if (Math.hypot(e.x - t.x, e.y - t.y) > t.base.range * CELL) continue;
-          hurtEnemy(e, trapDmgOf(t, e.def, empower));
+          hurtEnemy(e, trapDmgOf(t, enemyDefOf(e), empower + firstHitExtra(e)));
+          e.firstHit = true;
           if (!e.dead) e.paraT = Math.max(e.paraT, PARA_TIME * (1 - resOf(e.base, "para")));   // 麻痹抗性按百分比缩短
           hitAny = true;
         }
@@ -1670,7 +1722,8 @@ function update(dt) {
       if (target) {
         const chargeExtra = t.base.id === "bow" ? BOW_CHARGE_MUL * (t.charge || 0) : 0;   // 弓箭蓄力：每层 +50% 攻击力
         t.cd = trapIntervalOf(t);
-        hurtEnemy(target, trapDmgOf(t, target.def, chargeExtra));
+        hurtEnemy(target, trapDmgOf(t, enemyDefOf(target), chargeExtra + firstHitExtra(target)));
+        target.firstHit = true;
         if (t.base.id === "bow") t.charge = 0;                               // 开火后蓄力层数清零
         fx.push({ type: "tracer", x1: t.x, y1: t.y, x2: target.x + target.jx, y2: target.y + target.jy, ttl: 0.09 });
         if (t.base.id === "pistol" && chosen.includes("deadeye") && Math.random() < 0.6) {   // 弹无虚发：60% 额外攻击一次（不再触发）
@@ -1684,7 +1737,8 @@ function update(dt) {
             }
           }
           if (t2) {
-            hurtEnemy(t2, trapDmgOf(t, t2.def));
+            hurtEnemy(t2, trapDmgOf(t, enemyDefOf(t2), firstHitExtra(t2)));
+            t2.firstHit = true;
             fx.push({ type: "tracer", x1: t.x, y1: t.y, x2: t2.x + t2.jx, y2: t2.y + t2.jy, ttl: 0.09 });
           }
         }
@@ -1873,7 +1927,6 @@ function onPointerDown(p) {
     if (p.y >= BAR_Y) {
       for (const r of slotRects()) if (hitR(p, r)) {
         if (loadout[r.i]) { selTrap = selTrap === r.i ? -1 : r.i; demolishMode = false; }
-        else hint("暂无可用机关，等待后续更新");
         return;
       }
       return;
@@ -1906,7 +1959,11 @@ function onPointerDown(p) {
       }
     } else if (labTab === "tech") {
       if (techAllLit() && hitR(p, BTN_TECH_EXCHANGE)) { techExchange(); return; }
-      for (const n of TECH_NODES) if (hitR(p, techRect(n))) { techClick(n); return; }
+      if (p.y < TECH_VIEW_Y || p.y > TECH_VIEW_Y + TECH_VIEW_H) return;   // 视口外（灵感文案/底部提示区）不触发节点
+      for (const n of TECH_NODES) {
+        const r = techRect(n); r.y -= techScroll;                        // 节点随内容滚动
+        if (hitR(p, r)) { techClick(n); return; }
+      }
     } else {
       if (hitR(p, BTN_DRAW1)) { drawGacha(1); return; }
       if (hitR(p, BTN_DRAW10)) { drawGacha(10); return; }
@@ -1975,6 +2032,9 @@ canvas.addEventListener("touchmove", e => {
   } else if (labDragY != null && state === ST.TASK) {                // 任务页拖动滑屏
     taskScroll = Math.max(0, Math.min(taskMaxScroll(), taskScroll + (labDragY - mouse.y)));
     labDragY = mouse.y;
+  } else if (labDragY != null && state === ST.LAB && labTab === "tech") {   // 研发进度页拖动滑屏
+    techScroll = Math.max(0, Math.min(techMaxScroll(), techScroll + (labDragY - mouse.y)));
+    labDragY = mouse.y;
   }
 }, { passive: false });
 canvas.addEventListener("touchend", () => { labDragY = null; });
@@ -1985,6 +2045,9 @@ canvas.addEventListener("wheel", e => {                            // 桌面端�
   } else if (state === ST.TASK) {
     e.preventDefault();
     taskScroll = Math.max(0, Math.min(taskMaxScroll(), taskScroll + e.deltaY));
+  } else if (state === ST.LAB && labTab === "tech") {
+    e.preventDefault();
+    techScroll = Math.max(0, Math.min(techMaxScroll(), techScroll + e.deltaY));
   }
 }, { passive: false });
 
@@ -2528,7 +2591,7 @@ function drawNmLobby() {
     const st = i < lab.nmClaim ? 2 : (i === lab.nmClaim && lab.nmBest >= need) ? 1 : 0;
     drawPanel(r.x, r.y, r.w, r.h);
     pixelText(`总计通过 ${need} 波`, r.x + 16, r.y + 11, 14, "#fff", "left", false);
-    pixelText(`奶石×${NM_REWARD}`, r.x + r.w - 134, r.y + 12, 12, "#ffc7e6", "right", false);
+    pixelText(`奶石×${NM_REWARD} 材料×${NM_REWARD_MAT}`, r.x + r.w - 134, r.y + 12, 12, "#ffc7e6", "right", false);
     drawBtn(nmRowBtnRect(r), st === 2 ? "已领取" : st === 1 ? "领取" : "未达成",
       st === 2 ? "#3a3355" : st === 1 ? C.btn : "#554a7a",
       st === 2 ? "#6f5fa8" : st === 1 ? C.btnText : "#8f83c0", 14);
@@ -2857,12 +2920,22 @@ function render() {
   if (exchOpen) drawExch();                  // 圣眷珍材兑换面板
   if (giftPop) drawGiftPop();              // 赠送弹窗覆盖在最上层
 }
-/* ---- 科技树页：节点图（绘制与点击共用 techRect） ---- */
+/* ---- 科技树页：节点图（绘制与点击共用 techRect）；3列×6行超出视口，内容区可滚动（滚轮+拖动，同任务页） ---- */
 const TECH_NODE_W = 168, TECH_NODE_H = 80;
 const techRect = n => ({ x: n.x - TECH_NODE_W / 2, y: n.y - TECH_NODE_H / 2, w: TECH_NODE_W, h: TECH_NODE_H });
+const TECH_VIEW_Y = 122;                            // 科技树内容视口顶部（灵感文案下方）；底部预留 46px 给操作提示/兑换按钮
+const TECH_VIEW_H = H - TECH_VIEW_Y - 46;
+const techMaxScroll = () => {
+  let b = 0; for (const n of TECH_NODES) b = Math.max(b, n.y + TECH_NODE_H / 2);
+  return Math.max(0, b + 8 - 125 - TECH_VIEW_H);    // 内容自第 1 行顶(125)起算，底部留 8px 余量
+};
 const BTN_TECH_EXCHANGE = { x: W - 286, y: 602, w: 270, h: 34 };   // 全部点亮后：灵感兑换奶石（右下角）
 function drawLabTech() {            // 科技树页：并入研发所作为第三个标签页（内容区，不含标题与返回）
   pixelText(`灵感 ×${lab.inspire}`, W / 2, 104, 16, "#c9a6ff", "center");
+  techScroll = Math.max(0, Math.min(techMaxScroll(), techScroll));
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, TECH_VIEW_Y, W, TECH_VIEW_H); ctx.clip();
+  ctx.translate(0, -techScroll);
   /* 连线：前置节点 → 子节点（已点亮连线高亮） */
   for (const n of TECH_NODES) {
     if (!n.req) continue;
@@ -2877,9 +2950,25 @@ function drawLabTech() {            // 科技树页：并入研发所作为第�
     drawPanel(r.x, r.y, r.w, r.h, bg, lit ? (n.key ? "#ffd23f" : "#7cff6b") : "#554a7a");
     if (n.key) pixelText("★ 关键", r.x + r.w / 2, r.y + 4, 10, lit ? "#ffd23f" : "#8f83c0", "center", false);
     pixelText(n.name, r.x + r.w / 2, r.y + (n.key ? 19 : 10), 15, lit ? "#fff" : "#bdb2e8", "center", false);
-    pixelText(n.desc, r.x + r.w / 2, r.y + (n.key ? 40 : 33), 10, lit ? "#dfffd0" : "#8f83c0", "center", false);
+    /* 描述：超出卡片宽度时折两行（9px，按渲染宽度折行），避免文字溢出节点框 */
+    ctx.font = `bold 10px "Courier New", monospace`;
+    const descColor = lit ? "#dfffd0" : "#8f83c0";
+    if (ctx.measureText(n.desc).width > r.w - 14) {
+      const lines = wrapTextW(n.desc, r.w - 14, 9);
+      pixelText(lines[0], r.x + r.w / 2, r.y + (n.key ? 36 : 30), 9, descColor, "center", false);
+      if (lines[1]) pixelText(lines[1], r.x + r.w / 2, r.y + (n.key ? 47 : 41), 9, descColor, "center", false);
+    } else {
+      pixelText(n.desc, r.x + r.w / 2, r.y + (n.key ? 40 : 33), 10, descColor, "center", false);
+    }
     pixelText(lit ? "已点亮（点击熄灭）" : `灵感 ×${techCost(n)}`,
       r.x + r.w / 2, r.y + r.h - 21, 11, lit ? "#7cff6b" : lab.inspire >= techCost(n) ? "#ffd23f" : "#ff6b6b", "center", false);
+  }
+  ctx.restore();
+  /* 滚动条（可滚动时显示） */
+  const ms = techMaxScroll();
+  if (ms > 0) {
+    const sh = Math.max(40, TECH_VIEW_H * TECH_VIEW_H / (TECH_VIEW_H + ms));
+    px(W - 8, TECH_VIEW_Y + (TECH_VIEW_H - sh) * techScroll / ms, 5, sh, "rgba(255,255,255,.35)");
   }
   pixelText("点击节点点亮 / 熄灭（点亮需先点亮前置节点，熄灭返还灵感）", W / 2, 622, 12, "#8f83c0", "center", false);
   if (techAllLit()) {              // 全部点亮后：多余灵感可兑换奶石
@@ -2948,8 +3037,9 @@ function drawGiftPop() {        // 首次赠送奶石弹窗（点击任意处收
   px(bx + 21, by - 4, 6, 52, "#ffe873");
   px(bx + 11, by - 10, 10, 8, "#ffe873"); px(bx + 27, by - 10, 10, 8, "#ffe873");
   pixelText(giftPop.title, W / 2, y0 + 130, 22, "#ffd23f", "center", true);
-  pixelText(`奶石 +${giftPop.amount}`, W / 2, y0 + 170, 28, "#ffc7e6", "center", true);
-  pixelText(giftPop.sub, W / 2, y0 + 204, 13, "#9fd8ff", "center", false);
+  pixelText(`奶石 +${giftPop.amount}`, W / 2, y0 + (giftPop.mat ? 160 : 170), 28, "#ffc7e6", "center", true);
+  if (giftPop.mat) pixelText(`材料 +${giftPop.mat}`, W / 2, y0 + 196, 16, "#ffe873", "center", true);
+  pixelText(giftPop.sub, W / 2, y0 + (giftPop.mat ? 222 : 204), 13, "#9fd8ff", "center", false);
   pixelText("点击任意处收下", W / 2, y0 + ph - 26, 12, "#8f83c0", "center", false);
 }
 
